@@ -1,0 +1,9 @@
+uploads/
+server/uploads/
+users.db
+server/users.json
+server/messages.json
+node_modules/
+*.log
+.env
+
