@@ -9,12 +9,13 @@ function App() {
   const handleLogin = async (e) => {
     e.preventDefault()
     try {
-      const res = await axios.post(`${import.meta.env.VITE_API_URL}/api/login`, {
+      const res = await axios.post(`${import.meta.env.VITE_API_URL}/login`, {
         email, password
       })
-      setMsg('Login success: ' + res.data.token)
+      const message = res.data.message || `Login success, token: ${res.data.token}`
+      setMsg(message)
     } catch (err) {
-      setMsg('Error: ' + err.response?.data?.message || err.message)
+      setMsg('Error: ' + (err.response?.data?.message || err.message))
     }
   }
 
