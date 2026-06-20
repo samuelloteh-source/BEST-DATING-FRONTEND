@@ -83,6 +83,20 @@
   margin-bottom: 30px;
 }
 
+.discovery-card,
+.card-stack {
+  touch-action: pan-y;
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+
+.card-image,
+.card-image img {
+  touch-action: none;
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+
 .discovery-card {
   width: 100%;
   max-width: 380px;
@@ -91,7 +105,11 @@
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
   background: white;
   animation: cardAppear 0.4s ease;
-  touch-action: pan-y pinch-zoom;
+}
+
+html, body, #root {
+  overscroll-behavior-x: none;
+  overflow-x: hidden;
 }
 
 @keyframes cardAppear {
@@ -168,6 +186,9 @@
   background: white;
   max-height: 200px;
   overflow-y: auto;
+  touch-action: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .bio {

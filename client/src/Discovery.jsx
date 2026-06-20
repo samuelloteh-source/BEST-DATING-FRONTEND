@@ -7,7 +7,7 @@ export default function Discovery({ user, onLogout, onMatch, showHeader = true }
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
-  const [dragState, setDragState] = useState({ active: false, startX: 0, startY: 0, offsetX: 0, offsetY: 0 });
+  const [dragState, setDragState] = useState({ active: false, startX: 0, startY: 0, offsetX: 0, offsetY: 0, isSwiping: false });
   const cardRef = useRef(null);
   const swipeThreshold = 100;
 
@@ -31,7 +31,7 @@ export default function Discovery({ user, onLogout, onMatch, showHeader = true }
 
   const currentUser = users[currentIndex];
 
-  const resetDrag = () => setDragState({ active: false, startX: 0, startY: 0, offsetX: 0, offsetY: 0 });
+  const resetDrag = () => setDragState({ active: false, startX: 0, startY: 0, offsetX: 0, offsetY: 0, isSwiping: false });
 
   const handleLike = async () => {
     if (!currentUser) return;
@@ -62,28 +62,47 @@ export default function Discovery({ user, onLogout, onMatch, showHeader = true }
     }
   };
 
+  const getEventPosition = (event) => {
+    if (event.touches && event.touches.length > 0) {
+      return { clientX: event.touches[0].clientX, clientY: event.touches[0].clientY };
+    }
+    if (event.changedTouches && event.changedTouches.length > 0) {
+      return { clientX: event.changedTouches[0].clientX, clientY: event.changedTouches[0].clientY };
+    }
+    return { clientX: event.clientX, clientY: event.clientY };
+  };
+
   const handlePointerDown = (event) => {
     if (event.target.closest('button')) return;
-    event.preventDefault();
-    cardRef.current?.setPointerCapture(event.pointerId);
-    setDragState({ active: true, startX: event.clientX, startY: event.clientY, offsetX: 0, offsetY: 0 });
+    const { clientX, clientY } = getEventPosition(event);
+    setDragState({ active: true, startX: clientX, startY: clientY, offsetX: 0, offsetY: 0, isSwiping: false });
   };
 
   const handlePointerMove = (event) => {
     if (!dragState.active) return;
-    setDragState(prev => ({
-      ...prev,
-      offsetX: event.clientX - prev.startX,
-      offsetY: event.clientY - prev.startY
-    }));
+    const { clientX, clientY } = getEventPosition(event);
+    setDragState(prev => {
+      const offsetX = clientX - prev.startX;
+      const offsetY = clientY - prev.startY;
+      const absX = Math.abs(offsetX);
+      const absY = Math.abs(offsetY);
+      const isSwiping = prev.isSwiping || (absX > absY && absX > 10);
+      if (!isSwiping) {
+        return prev;
+      }
+      event.preventDefault();
+      return { ...prev, offsetX, offsetY, isSwiping };
+    });
   };
 
   const handlePointerUp = () => {
     if (!dragState.active) return;
-    if (dragState.offsetX > swipeThreshold) {
-      handleLike();
-    } else if (dragState.offsetX < -swipeThreshold) {
-      handlePass();
+    if (dragState.isSwiping && Math.abs(dragState.offsetX) > swipeThreshold) {
+      if (dragState.offsetX > 0) {
+        handleLike();
+      } else {
+        handlePass();
+      }
     } else {
       resetDrag();
     }
@@ -112,7 +131,7 @@ export default function Discovery({ user, onLogout, onMatch, showHeader = true }
   }
 
   const cardTransform = {
-    transform: `translate(${dragState.offsetX}px, ${dragState.offsetY}px) rotate(${dragState.offsetX / 20}deg)`,
+    transform: `translateX(${dragState.isSwiping ? dragState.offsetX : 0}px) rotate(${dragState.offsetX / 20}deg)`,
     transition: dragState.active ? 'none' : 'transform 0.25s ease',
   };
 
