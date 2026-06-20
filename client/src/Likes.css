@@ -1,0 +1,120 @@
+.likes-container {
+  min-height: calc(100vh - 160px);
+  padding: 20px;
+  max-width: 1126px;
+  margin: 0 auto;
+  color: #fff;
+}
+
+.likes-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+
+.likes-header h1 {
+  margin: 0;
+  font-size: 32px;
+}
+
+.likes-header p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.likes-error {
+  margin-bottom: 18px;
+  padding: 14px 18px;
+  border-radius: 24px;
+  background: rgba(255, 0, 109, 0.18);
+  color: #ffd1e8;
+}
+
+.likes-empty {
+  margin-top: 20px;
+  padding: 30px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: center;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.likes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.like-card {
+  border-radius: 28px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  min-height: 320px;
+}
+
+.like-card-image {
+  width: 100%;
+  min-height: 180px;
+  overflow: hidden;
+}
+
+.like-card-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.like-card-body {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.like-card-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.like-card-subtitle {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.like-card-bio {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.85);
+  line-height: 1.5;
+  flex: 1;
+}
+
+.like-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  width: fit-content;
+}
+
+@media (max-width: 720px) {
+  .likes-container {
+    padding: 16px;
+    min-height: calc(100vh - 140px);
+  }
+
+  .likes-header h1 {
+    font-size: 28px;
+  }
+}

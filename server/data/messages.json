@@ -1,0 +1,16 @@
+[
+  {
+    "id": "42b9a653-8228-40e4-a980-abcfe70af4d7",
+    "from": "f81d5f63-ce46-4954-9eb4-bb2d98f8eda3",
+    "to": "6cebea88-90e2-4828-8a53-bc915b226fc6",
+    "text": "hi",
+    "timestamp": 1781917823289
+  },
+  {
+    "id": "ffad3e15-5deb-48e4-be75-a36c3df20846",
+    "from": "6cebea88-90e2-4828-8a53-bc915b226fc6",
+    "to": "f81d5f63-ce46-4954-9eb4-bb2d98f8eda3",
+    "text": "Hello",
+    "timestamp": 1781917837599
+  }
+]

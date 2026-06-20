@@ -139,6 +139,20 @@ async function ensureTables() {
       created_at INTEGER,
       expires_at INTEGER
     )`);
+    await client.run(`CREATE TABLE IF NOT EXISTS user_likes (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      liked_user_id TEXT NOT NULL,
+      created_at INTEGER,
+      UNIQUE(user_id, liked_user_id)
+    )`);
+    await client.run(`CREATE TABLE IF NOT EXISTS matches (
+      id TEXT PRIMARY KEY,
+      user1_id TEXT NOT NULL,
+      user2_id TEXT NOT NULL,
+      created_at INTEGER,
+      UNIQUE(user1_id, user2_id)
+    )`);
   } else {
     await client.query(`CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
@@ -158,6 +172,20 @@ async function ensureTables() {
       data TEXT NOT NULL,
       created_at BIGINT,
       expires_at BIGINT
+    )`);
+    await client.query(`CREATE TABLE IF NOT EXISTS user_likes (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      liked_user_id TEXT NOT NULL,
+      created_at BIGINT,
+      UNIQUE(user_id, liked_user_id)
+    )`);
+    await client.query(`CREATE TABLE IF NOT EXISTS matches (
+      id TEXT PRIMARY KEY,
+      user1_id TEXT NOT NULL,
+      user2_id TEXT NOT NULL,
+      created_at BIGINT,
+      UNIQUE(user1_id, user2_id)
     )`);
   }
 }
@@ -337,6 +365,65 @@ async function seedFromJsonIfNeeded() {
   }
 }
 
+async function addLike(userId, likedUserId) {
+  const id = `${userId}_${likedUserId}_${Date.now()}`;
+  if (client.mode === 'sqlite') {
+    await client.run('INSERT OR REPLACE INTO user_likes (id, user_id, liked_user_id, created_at) VALUES (?, ?, ?, ?)',
+      [id, userId, likedUserId, Date.now()]);
+  } else {
+    await client.query(
+      'INSERT INTO user_likes (id, user_id, liked_user_id, created_at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
+      [id, userId, likedUserId, Date.now()]);
+  }
+}
+
+async function hasUserLiked(userId, likedUserId) {
+  const likes = await client.query(
+    client.mode === 'sqlite' 
+      ? 'SELECT id FROM user_likes WHERE user_id = ? AND liked_user_id = ?' 
+      : 'SELECT id FROM user_likes WHERE user_id = $1 AND liked_user_id = $2',
+    client.mode === 'sqlite' ? [userId, likedUserId] : [userId, likedUserId]
+  );
+  return likes.length > 0;
+}
+
+async function createMatch(userId1, userId2) {
+  const id = `match_${Math.min(userId1, userId2)}_${Math.max(userId1, userId2)}_${Date.now()}`;
+  const user1_id = userId1;
+  const user2_id = userId2;
+  
+  if (client.mode === 'sqlite') {
+    await client.run('INSERT OR REPLACE INTO matches (id, user1_id, user2_id, created_at) VALUES (?, ?, ?, ?)',
+      [id, user1_id, user2_id, Date.now()]);
+  } else {
+    await client.query(
+      'INSERT INTO matches (id, user1_id, user2_id, created_at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
+      [id, user1_id, user2_id, Date.now()]);
+  }
+}
+
+async function getMatches(userId) {
+  const matches = await client.query(
+    client.mode === 'sqlite'
+      ? 'SELECT * FROM matches WHERE user1_id = ? OR user2_id = ?'
+      : 'SELECT * FROM matches WHERE user1_id = $1 OR user2_id = $2',
+    client.mode === 'sqlite' ? [userId, userId] : [userId, userId]
+  );
+  return matches;
+}
+
+async function isMatched(userId1, userId2) {
+  const matches = await client.query(
+    client.mode === 'sqlite'
+      ? 'SELECT id FROM matches WHERE (user1_id = ? AND user2_id = ?) OR (user1_id = ? AND user2_id = ?)'
+      : 'SELECT id FROM matches WHERE (user1_id = $1 AND user2_id = $2) OR (user1_id = $3 AND user2_id = $4)',
+    client.mode === 'sqlite' 
+      ? [userId1, userId2, userId2, userId1] 
+      : [userId1, userId2, userId2, userId1]
+  );
+  return matches.length > 0;
+}
+
 async function initDb() {
   if (client) return;
 
@@ -359,4 +446,9 @@ module.exports = {
   saveUsersToDb,
   savePendingSignupsToDb,
   saveMessagesToDb,
+  addLike,
+  hasUserLiked,
+  createMatch,
+  getMatches,
+  isMatched,
 };

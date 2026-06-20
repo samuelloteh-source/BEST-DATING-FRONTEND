@@ -1,12 +1,17 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
+const sendEmail = require('./sendEmail');
+const dotenv = require('dotenv');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const dns = require('dns').promises;
 const db = require('./db');
+
+dotenv.config();
 
 // Multer with file size limits and image type filter
 const upload = multer({ 
@@ -30,6 +35,7 @@ function maybeUpload(req, res, next) {
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
+const JWT_SECRET = process.env.JWT_SECRET || 'sparkdating_jwt_secret';
 
 const http = require('http');
 
@@ -86,6 +92,12 @@ function generateToken() {
   return crypto.randomBytes(20).toString('hex');
 }
 
+async function sendGridMail(mailOptions) {
+  if (!process.env.SENDGRID_API_KEY) return null;
+  await sendEmail(mailOptions.to, mailOptions.subject, mailOptions.text || 'Please verify your account.')
+  return { messageId: 'sendgrid', previewUrl: null };
+}
+
 async function sendEmailWithFallback(mailOptions) {
   async function sendWith(transporter) {
     const info = await transporter.sendMail(mailOptions);
@@ -94,6 +106,14 @@ async function sendEmailWithFallback(mailOptions) {
   }
 
   try {
+    if (process.env.SENDGRID_API_KEY) {
+      try {
+        return await sendGridMail(mailOptions);
+      } catch (sgErr) {
+        console.warn('SendGrid send failed, falling back to SMTP/Ethereal:', sgErr && sgErr.message ? sgErr.message : sgErr);
+      }
+    }
+
     const transporter = await getTransporter();
     return await sendWith(transporter);
   } catch (e) {
@@ -112,7 +132,7 @@ async function sendEmailWithFallback(mailOptions) {
 async function sendVerificationEmail(user, token) {
   const verifyUrl = `http://localhost:${PORT}/verify-email?token=${token}`;
   return sendEmailWithFallback({
-    from: process.env.EMAIL_FROM || 'no-reply@spark.local',
+    from: `Spark Dating <${process.env.EMAIL_FROM}>`,
     to: user.email,
     subject: 'Verify your SPARK account',
     html: `<p>Hi ${user.name || ''},</p><p>Please verify your email by clicking <a href="${verifyUrl}">this link</a>.</p>`
@@ -122,7 +142,7 @@ async function sendVerificationEmail(user, token) {
 async function sendPasswordResetEmail(user, token) {
   const resetUrl = `http://localhost:${PORT}/reset-password.html?token=${token}`;
   const result = await sendEmailWithFallback({
-    from: process.env.EMAIL_FROM || 'no-reply@spark.local',
+    from: `Spark Dating <${process.env.EMAIL_FROM}>`,
     to: user.email,
     subject: 'SPARK password reset',
     html: `<p>Hi ${user.name || ''},</p><p>Reset your password using <a href="${resetUrl}">this link</a>. The link expires in 1 hour.</p>`
@@ -152,6 +172,10 @@ app.use((req, res, next) => {
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
+
+const userRoutes = require('./routes/user');
+app.use('/api/user', userRoutes);
+
 function normalizeEmail(email) {
   return typeof email === 'string' ? email.trim().toLowerCase() : '';
 }
@@ -173,6 +197,24 @@ function getAuthToken(req) {
   return getCookieValue(req, 'authToken');
 }
 
+function isJwtToken(token) {
+  return typeof token === 'string' && token.split('.').length === 3;
+}
+
+function resolveUserByToken(token, users) {
+  if (!token) return null;
+  if (isJwtToken(token)) {
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      if (!payload || !payload.id) return null;
+      return users.find(u => String(u.id) === String(payload.id));
+    } catch (err) {
+      return null;
+    }
+  }
+  return users.find(u => u.authToken === token && u.authTokenExpires && Date.now() < u.authTokenExpires);
+}
+
 function cleanUserForClient(user) {
   if (!user) return null;
   const {
@@ -191,6 +233,7 @@ function cleanUserForClient(user) {
     interests: Array.isArray(safe.interests) ? safe.interests : [],
     gallery: Array.isArray(safe.gallery) ? safe.gallery : [],
     likes: Array.isArray(safe.likes) ? safe.likes : [],
+    notifications: Array.isArray(safe.notifications) ? safe.notifications : [],
     lookingFor: safe.lookingFor || 'Any'
   };
 }
@@ -200,14 +243,21 @@ function getUserById(userId, users = null) {
   return pool.find(u => String(u.id) === String(userId));
 }
 
+function createNotification(text, partnerId) {
+  return {
+    id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    type: 'match',
+    text: sanitizeString(text),
+    partnerId,
+    timestamp: Date.now(),
+    read: false
+  };
+}
+
 async function requireAuth(req, res, next) {
   const token = getAuthToken(req);
   const users = await loadUsersFromFile();
-  let user = null;
-
-  if (token) {
-    user = users.find(u => u.authToken === token && u.authTokenExpires && Date.now() < u.authTokenExpires);
-  }
+  const user = resolveUserByToken(token, users);
 
   if (!user) {
     return res.status(401).json({ success: false, message: 'Session expired or invalid authentication' });
@@ -405,7 +455,8 @@ app.post('/login', async (req, res) => {
       path: '/'
     });
 
-    res.json({ success: true, user: cleanUserForClient(user) });
+    const jwtToken = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '24h' });
+    res.json({ success: true, user: cleanUserForClient(user), token: jwtToken });
   } catch (err) {
     console.error('LOGIN ERROR:', err);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -1154,6 +1205,225 @@ app.get('/admin', async (req, res) => {
   </script>
   </body></html>`;
   res.send(html);
+});
+
+// Discovery endpoint - get potential matches
+app.get('/discover', requireAuth, async (req, res) => {
+  try {
+    const users = await loadUsersFromFile();
+    const currentUser = getUserById(req.userId, users);
+    
+    if (!currentUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Get list of users to exclude (self, already liked, already matched)
+    const likedIds = currentUser.likes || [];
+    const passedIds = currentUser.passed || [];
+    const excludeIds = new Set([req.userId, ...likedIds, ...passedIds]);
+
+    // Filter potential matches
+    const potentialMatches = users.filter(u => 
+      !excludeIds.has(u.id) && 
+      u.emailVerified && 
+      !u.suspended &&
+      u.id !== req.userId
+    );
+
+    // Shuffle and return top 10
+    const shuffled = potentialMatches.sort(() => Math.random() - 0.5).slice(0, 10);
+    const safe = shuffled.map(u => cleanUserForClient(u));
+
+    res.json({ success: true, users: safe });
+  } catch (err) {
+    console.error('Discover error:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch discover' });
+  }
+});
+
+// Like a user and check for match
+app.post('/discover/like', requireAuth, async (req, res) => {
+  try {
+    const targetId = req.body.targetId;
+    if (!targetId) {
+      return res.status(400).json({ success: false, message: 'Missing target user' });
+    }
+
+    const users = await loadUsersFromFile();
+    const currentUser = getUserById(req.userId, users);
+    const targetUser = getUserById(targetId, users);
+
+    if (!currentUser || !targetUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Add like
+    if (!currentUser.likes) currentUser.likes = [];
+    if (!currentUser.likes.includes(targetId)) {
+      currentUser.likes.push(targetId);
+    }
+
+    // Check if target also liked current user (match)
+    const isMatch = targetUser.likes && targetUser.likes.includes(req.userId);
+    if (isMatch) {
+      if (!currentUser.notifications) currentUser.notifications = [];
+      if (!targetUser.notifications) targetUser.notifications = [];
+
+      const notificationText = `${targetUser.name || 'Someone'} liked you back — it\'s a match!`; 
+      const partnerNotificationText = `${currentUser.name || 'Someone'} liked you back — it\'s a match!`;
+
+      currentUser.notifications.push(createNotification(notificationText, targetId));
+      targetUser.notifications.push(createNotification(partnerNotificationText, req.userId));
+    }
+
+    await saveUsersToFile(users);
+
+    res.json({ success: true, isMatch, message: isMatch ? 'It\'s a match!' : 'Liked!' });
+  } catch (err) {
+    console.error('Like error:', err);
+    res.status(500).json({ success: false, message: 'Failed to like user' });
+  }
+});
+
+app.get('/notifications', requireAuth, async (req, res) => {
+  try {
+    const users = await loadUsersFromFile();
+    const currentUser = getUserById(req.userId, users);
+    if (!currentUser) return res.status(404).json({ success: false, message: 'User not found' });
+    const notifications = Array.isArray(currentUser.notifications) ? currentUser.notifications : [];
+    res.json({ success: true, notifications });
+  } catch (err) {
+    console.error('Notifications error:', err);
+    res.status(500).json({ success: false, message: 'Failed to load notifications' });
+  }
+});
+
+// Pass on a user
+app.post('/discover/pass', requireAuth, async (req, res) => {
+  try {
+    const targetId = req.body.targetId;
+    if (!targetId) {
+      return res.status(400).json({ success: false, message: 'Missing target user' });
+    }
+
+    const users = await loadUsersFromFile();
+    const currentUser = getUserById(req.userId, users);
+
+    if (!currentUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Add to passed list
+    if (!currentUser.passed) currentUser.passed = [];
+    if (!currentUser.passed.includes(targetId)) {
+      currentUser.passed.push(targetId);
+    }
+
+    await saveUsersToFile(users);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Pass error:', err);
+    res.status(500).json({ success: false, message: 'Failed to pass user' });
+  }
+});
+
+// Get all matches
+app.get('/matches', requireAuth, async (req, res) => {
+  try {
+    const users = await loadUsersFromFile();
+    const currentUser = getUserById(req.userId, users);
+
+    if (!currentUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const likedIds = currentUser.likes || [];
+    
+    // Find mutual likes (matches)
+    const matches = users.filter(u => 
+      likedIds.includes(u.id) && 
+      u.likes && 
+      u.likes.includes(req.userId) &&
+      u.emailVerified &&
+      !u.suspended
+    );
+
+    const safeMatches = matches.map(u => cleanUserForClient(u));
+    res.json({ success: true, matches: safeMatches });
+  } catch (err) {
+    console.error('Matches error:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch matches' });
+  }
+});
+
+// Send message to matched user
+app.post('/messages/send', requireAuth, async (req, res) => {
+  try {
+    const { recipientId, text } = req.body;
+    if (!recipientId || !text) {
+      return res.status(400).json({ success: false, message: 'Missing recipient or text' });
+    }
+
+    const users = await loadUsersFromFile();
+    const currentUser = getUserById(req.userId, users);
+    const recipientUser = getUserById(recipientId, users);
+
+    if (!currentUser || !recipientUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Check if they're matched
+    const isMatched = (currentUser.likes && currentUser.likes.includes(recipientId)) &&
+                      (recipientUser.likes && recipientUser.likes.includes(req.userId));
+
+    if (!isMatched) {
+      return res.status(403).json({ success: false, message: 'Can only message matched users' });
+    }
+
+    // Create message
+    const messages = await loadMessagesFromFile();
+    const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const message = {
+      id: messageId,
+      from: req.userId,
+      to: recipientId,
+      text: sanitizeString(text),
+      timestamp: Date.now(),
+      read: false
+    };
+
+    messages.push(message);
+    await saveMessagesToFile(messages);
+
+    if (!recipientUser.notifications) recipientUser.notifications = [];
+    recipientUser.notifications.push(createNotification(`${currentUser.name || 'Someone'} sent you a message`, req.userId));
+    await saveUsersToFile(users);
+
+    res.json({ success: true, message });
+  } catch (err) {
+    console.error('Send message error:', err);
+    res.status(500).json({ success: false, message: 'Failed to send message' });
+  }
+});
+
+// Get conversation with a matched user
+app.get('/messages/conversation/:userId', requireAuth, async (req, res) => {
+  try {
+    const otherUserId = req.params.userId;
+    const messages = await loadMessagesFromFile();
+    
+    // Get messages between current user and other user
+    const conversation = messages.filter(m => 
+      (m.from === req.userId && m.to === otherUserId) ||
+      (m.from === otherUserId && m.to === req.userId)
+    ).sort((a, b) => a.timestamp - b.timestamp);
+
+    res.json({ success: true, messages: conversation });
+  } catch (err) {
+    console.error('Get conversation error:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch conversation' });
+  }
 });
 
 // Create HTTP server and attach Socket.io for real-time messaging

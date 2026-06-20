@@ -2,7 +2,12 @@ const fs = require('fs');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 
-const usersFile = path.join(__dirname, 'users.json');
+const dataDir = path.join(__dirname, 'data');
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+
+const usersFile = path.join(dataDir, 'users.json');
 const password = 'Password123!';
 const passwordHash = bcrypt.hashSync(password, 10);
 
@@ -25,7 +30,8 @@ const names = [
   'Gina Brooks','Hope Ellis','Iris Fields','June Grey','Kate Hale','Lily Irwin','Molly Jones','Nora Lane','Opal Moore','Paige North'
 ];
 
-const interestPool = ['Music','Travel','Fitness','Food','Movies','Reading','Art','Outdoors','Pets','Tech','Fashion','Cooking','Yoga','Photography','Health','Dance','Hiking','Sports','Writing','Gaming'];
+const interestPool = ['music','travel','fitness','food','movies','reading','art','outdoors','pets','tech','fashion','cooking','yoga','photography','health','dance','hiking','sports','writing','gaming','coffee','beaches','weekend getaways','live music','gardening','self-care','theater','road trips'];
+const cities = ['Austin','Boston','Chicago','Denver','Nashville','Portland','Seattle','Miami','San Diego','Phoenix','Atlanta','Charlotte','Dallas','Raleigh','Orlando','San Francisco','Minneapolis','Columbus','Houston','Las Vegas'];
 
 function randomDate(year) {
   const month = Math.floor(Math.random() * 12) + 1;
@@ -44,14 +50,14 @@ function chooseInterests() {
   return selected;
 }
 
-function generateBio(interests, state, ageGroup) {
-  const topInterests = interests.slice(0, 3).join(', ');
+function generateBio(interests, city, state, ageGroup) {
+  const topInterests = interests.slice(0, 3).map(i => i.toLowerCase()).join(', ');
   const templates = [
-    `I'm a ${ageGroup === 2 ? 'well-traveled' : 'fun-loving'} woman from ${state} who enjoys ${topInterests}.`,
-    `I'm passionate about ${topInterests} and living life to the fullest from ${state}.`,
-    `I love ${topInterests} and I'm always looking for an adventure from ${state}.`,
-    `From ${state}, I'm ${ageGroup === 2 ? 'a seasoned traveler' : 'someone who loves exploring'} and enjoying ${topInterests}.`,
-    `I'm into ${topInterests} and making the most of life from ${state}.`
+    `I love living in ${city}, ${state}, and I spend my free time enjoying ${topInterests}.`,
+    `I enjoy ${topInterests}, exploring new spots around ${city}, and I try to stay curious every day.`,
+    `I’m a ${ageGroup === 2 ? 'thoughtful' : 'energetic'} woman from ${city} who is always up for ${topInterests}.`,
+    `When I’m not working, I’m usually ${topInterests} or planning my next weekend adventure near ${city}.`,
+    `I’m into ${topInterests} and I love meeting new people who appreciate good conversation and a little spontaneity.`
   ];
   return templates[Math.floor(Math.random() * templates.length)];
 }
@@ -60,29 +66,37 @@ const seededUsers = [];
 for (let i = 0; i < 70; i += 1) {
   const name = names[i] || `User ${i + 1}`;
   const state = states[i % states.length];
+  const city = cities[i % cities.length];
   const ageGroup = i % 3; // 0 => 25s, 1 => 30s, 2 => 50s
-  const year = ageGroup === 0 ? 2001 : ageGroup === 1 ? 1996 : 1976;
+  const year = ageGroup === 0 ? 1999 : ageGroup === 1 ? 1992 : 1984;
   const dob = randomDate(year);
   const email = `${name.toLowerCase().replace(/\s+/g, '.')}@example.com`;
   const photoIndex = i % 99;
   const photo = `https://randomuser.me/api/portraits/women/${photoIndex}.jpg`;
   const interests = chooseInterests();
-  const bio = generateBio(interests, state, ageGroup);
+  const bio = generateBio(interests, city, state, ageGroup);
 
   seededUsers.push({
-    id: `${Date.now()}${i}`,
+    id: `female-${i + 1}-${Date.now()}`,
     name,
     dob,
     bio,
     email,
-    password: passwordHash,
+    passwordHash,
     photo,
+    avatar: photo,
     gender: 'Female',
-    country: state,
+    country: 'USA',
+    state,
+    city,
     interests,
     likes: [],
-    messages: [],
-    emailVerified: true
+    passed: [],
+    matches: [],
+    notifications: [],
+    emailVerified: true,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
   });
 }
 
