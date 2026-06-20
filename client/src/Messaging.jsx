@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import axios from './api';
 import './Messaging.css';
 
 export default function Messaging({ user, match, onBack }) {
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -26,14 +27,21 @@ export default function Messaging({ user, match, onBack }) {
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!inputText.trim()) return;
+    const trimmedText = inputText.trim();
+    if (!trimmedText && !selectedFile) return;
 
     try {
-      await axios.post('/messages/send', {
-        recipientId: match.id,
-        text: inputText
+      const formData = new FormData();
+      formData.append('recipientId', match.id);
+      if (trimmedText) formData.append('text', trimmedText);
+      if (selectedFile) formData.append('photo', selectedFile);
+
+      await axios.post('/messages/send', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
       });
+
       setInputText('');
+      setSelectedFile(null);
       fetchMessages();
     } catch (err) {
       console.error('Failed to send message:', err);
@@ -63,13 +71,24 @@ export default function Messaging({ user, match, onBack }) {
               key={msg.id} 
               className={`message ${msg.from === user.id ? 'sent' : 'received'}`}
             >
-              <div className="message-bubble">{msg.text}</div>
+              <div className="message-bubble">
+                {msg.text && <span>{msg.text}</span>}
+                {msg.photo && <img src={msg.photo} alt="Sent attachment" />}
+              </div>
             </div>
           ))
         )}
       </div>
 
       <form onSubmit={handleSendMessage} className="message-form">
+        <label className="image-upload-label">
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+          />
+          📷
+        </label>
         <input
           type="text"
           value={inputText}
@@ -79,6 +98,7 @@ export default function Messaging({ user, match, onBack }) {
         />
         <button type="submit" className="send-btn">Send</button>
       </form>
+      {selectedFile && <div className="selected-file-preview">Selected: {selectedFile.name}</div>}
     </div>
   );
 }

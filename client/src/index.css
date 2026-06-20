@@ -85,7 +85,7 @@ html, body {
   max-width: 100%;
   margin: 0 auto;
   min-height: 100vh;
-  padding: 0 12px 120px;
+  padding: 0 12px;
 }
 
 .page-shell {
@@ -103,6 +103,20 @@ html, body {
   width: 100%;
   max-width: 560px;
   padding: 20px;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 100px;
+}
+
+.page-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .page-card {

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import axios from 'axios'
+import axios from './api'
 import Discovery from './Discovery'
 import Matches from './Matches'
 import Messaging from './Messaging'
@@ -19,6 +19,14 @@ function App() {
   const [selectedMatch, setSelectedMatch] = useState(null)
   const [notifications, setNotifications] = useState([])
   const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const [discoverFilters, setDiscoverFilters] = useState(() => {
+    try {
+      const saved = localStorage.getItem('discoverFilters')
+      return saved ? JSON.parse(saved) : { minAge: 18, maxAge: 55, country: '', state: '', interests: [] }
+    } catch {
+      return { minAge: 18, maxAge: 55, country: '', state: '', interests: [] }
+    }
+  })
   const [step, setStep] = useState(1)
   const [message, setMessage] = useState('')
   const [loginEmail, setLoginEmail] = useState('')
@@ -27,17 +35,6 @@ function App() {
     firstName: '', lastName: '', email: '', password: '', dob: '', country: '', stateRegion: '',
     interests: [], bio: '', profileFile: null
   })
-
-  const runtimeHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    ? 'localhost'
-    : window.location.hostname
-  const apiBaseUrl = import.meta.env.VITE_API_URL || `${window.location.protocol}//${runtimeHost}:3001`
-
-  axios.defaults.withCredentials = false
-
-  useEffect(() => {
-    axios.defaults.baseURL = apiBaseUrl
-  }, [apiBaseUrl])
 
   useEffect(() => {
     const path = window.location.pathname
@@ -52,13 +49,19 @@ function App() {
     if (authToken) {
       axios.defaults.headers.common['Authorization'] = `Bearer ${authToken}`
       fetchNotifications()
+    } else {
+      delete axios.defaults.headers.common['Authorization']
     }
     fetchCurrentUser()
   }, [authToken])
 
+  useEffect(() => {
+    localStorage.setItem('discoverFilters', JSON.stringify(discoverFilters))
+  }, [discoverFilters])
+
   const fetchNotifications = async () => {
     try {
-      const res = await axios.get(`${apiBaseUrl}/notifications`)
+      const res = await axios.get('/notifications')
       if (res.data?.success) {
         setNotifications(res.data.notifications || [])
       }
@@ -70,7 +73,7 @@ function App() {
 
   const fetchCurrentUser = async () => {
     try {
-      const res = await axios.get(`${apiBaseUrl}/me`)
+      const res = await axios.get('/me')
       setUser(res.data.user || res.data)
       setView('app')
     } catch (err) {
@@ -82,7 +85,7 @@ function App() {
   const handleLogin = async (e) => {
     e.preventDefault()
     try {
-      const res = await axios.post(`${apiBaseUrl}/login`, { email: loginEmail, password: loginPassword })
+      const res = await axios.post('/login', { email: loginEmail, password: loginPassword })
       if (res.data?.success) {
         setMessage('Login successful!')
         setLoginEmail('')
@@ -109,8 +112,9 @@ function App() {
   }
 
   const handleLogout = async () => {
-    try { await axios.post(`${apiBaseUrl}/logout`) } catch (e) {}
+    try { await axios.post('/logout') } catch (e) {}
     localStorage.removeItem('authToken')
+    delete axios.defaults.headers.common['Authorization']
     setAuthToken(null)
     setUser(null)
     setView('login')
@@ -156,7 +160,7 @@ function App() {
       formData.append('bio', signup.bio)
       if (signup.profileFile) formData.append('photo', signup.profileFile)
 
-      const res = await axios.post(`${apiBaseUrl}/signup`, formData)
+      const res = await axios.post('/signup', formData)
       if (res.data?.success) {
         setMessage('Signup complete! Please log in.')
         setView('login')
@@ -233,15 +237,17 @@ function App() {
     if (selectedMatch) return <Messaging user={user} match={selectedMatch} onBack={() => setSelectedMatch(null)} />
 
     const pageContent = currentPage === 'discover'
-      ? <Discovery user={user} onLogout={handleLogout} onMatch={refreshNotifications} showHeader={false} />
+      ? <Discovery user={user} onMatch={refreshNotifications} showHeader={false} filters={discoverFilters} />
       : currentPage === 'matches'
         ? <Matches user={user} onSelectMatch={setSelectedMatch} onLogout={handleLogout} />
-        : currentPage === 'likes'
-          ? <Likes />
-          : <Profile user={user} onUpdateUser={setUser} onLogout={handleLogout} />
+        : currentPage === 'messages'
+          ? <Matches user={user} title="Messages" emptyText="No conversations yet. Keep matching!" onSelectMatch={setSelectedMatch} onLogout={handleLogout} />
+          : currentPage === 'likes'
+            ? <Likes />
+            : <Profile user={user} onUpdateUser={setUser} onLogout={handleLogout} discoverFilters={discoverFilters} onUpdateDiscoverFilters={setDiscoverFilters} />
 
     return (
-      <>
+      <div className="app-shell">
         {currentPage === 'discover' && (
           <div className="app-bar">
             <div>
@@ -252,7 +258,6 @@ function App() {
               <button className="notification-btn" onClick={handleToggleNotifications}>
                 🔔 {notifications.filter(n => !n.read).length}
               </button>
-              <button className="logout-btn" onClick={handleLogout}>Logout</button>
             </div>
           </div>
         )}
@@ -276,14 +281,17 @@ function App() {
             )}
           </div>
         )}
-        {pageContent}
+        <div className="page-content">
+          {pageContent}
+        </div>
         <div className="app-navigation">
           <button className={`nav-btn ${currentPage === 'discover' ? 'active' : ''}`} onClick={() => setCurrentPage('discover')}>Discover</button>
           <button className={`nav-btn ${currentPage === 'matches' ? 'active' : ''}`} onClick={() => setCurrentPage('matches')}>Matches</button>
+          <button className={`nav-btn ${currentPage === 'messages' ? 'active' : ''}`} onClick={() => setCurrentPage('messages')}>Messages</button>
           <button className={`nav-btn ${currentPage === 'likes' ? 'active' : ''}`} onClick={() => setCurrentPage('likes')}>Likes</button>
           <button className={`nav-btn ${currentPage === 'profile' ? 'active' : ''}`} onClick={() => setCurrentPage('profile')}>Profile</button>
         </div>
-      </>
+      </div>
     )
   }
 

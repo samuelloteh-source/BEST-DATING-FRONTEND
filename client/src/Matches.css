@@ -107,6 +107,36 @@
   text-overflow: ellipsis;
 }
 
+.online-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 10px;
+  color: #ccc;
+  padding: 2px 6px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 10px;
+  width: fit-content;
+}
+
+.online-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #999;
+  transition: background 0.3s ease;
+}
+
+.online-dot.online {
+  background: #4ade80;
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.6);
+}
+
+.online-dot.offline {
+  background: #999;
+}
+
 .match-info {
   padding: 12px;
 }

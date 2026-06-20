@@ -149,6 +149,12 @@
   line-height: 1.5;
 }
 
+.message-bubble img {
+  max-width: 100%;
+  border-radius: 16px;
+  margin-top: 8px;
+}
+
 .sent .message-bubble {
   background: #ff006d;
   color: white;
@@ -167,6 +173,31 @@
   padding: 15px 20px;
   border-top: 1px solid #333;
   background: rgba(0, 0, 0, 0.5);
+  align-items: center;
+}
+
+.image-upload-label {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffb6d1;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  font-size: 20px;
+}
+
+.image-upload-label input {
+  display: none;
+}
+
+.selected-file-preview {
+  color: #ccc;
+  font-size: 13px;
+  padding: 0 20px 10px;
 }
 
 .message-input {

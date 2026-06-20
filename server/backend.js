@@ -5,14 +5,25 @@ const multer = require('multer');
 const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
+const http = require('http');
+const socketIo = require('socket.io');
+const scheduler = require('./seeded-user-scheduler');
 
 const app = express();
+const server = http.createServer(app);
+const io = socketIo(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
+});
 const PORT = Number(process.env.PORT || 3001);
 const JWT_SECRET = process.env.JWT_SECRET || 'sparkdating_jwt_secret';
-const DATA_DIR = path.join(__dirname, 'data');
+// Use the canonical data files in the server folder to avoid multiple user stores
+const DATA_DIR = path.join(__dirname); // keep for compatibility
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
-const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
+const USERS_FILE = path.join(__dirname, 'users.json');
+const MESSAGES_FILE = path.join(__dirname, 'messages.json');
 
 const upload = multer({
   dest: UPLOADS_DIR,
@@ -46,7 +57,7 @@ function cleanUserForClient(user) {
     ...safe
   } = user;
 
-  return {
+  const cleaned = {
     ...safe,
     email: normalizeEmail(safe.email),
     photo: safe.photo || '',
@@ -57,6 +68,13 @@ function cleanUserForClient(user) {
     passed: Array.isArray(safe.passed) ? safe.passed : [],
     matches: Array.isArray(safe.matches) ? safe.matches : [],
   };
+
+  // Add online status for seeded users
+  if (safe.id && safe.id.startsWith('seed_')) {
+    cleaned.isOnline = scheduler.isSeededUserOnline(safe.id);
+  }
+
+  return cleaned;
 }
 
 async function ensureStorage() {
@@ -268,7 +286,12 @@ app.get('/discover', authMiddleware, async (req, res) => {
 
   const excluded = new Set([currentUser.id, ...(currentUser.passed || []), ...(currentUser.likes || []), ...(currentUser.matches || [])]);
   const candidates = users
-    .filter(u => !excluded.has(u.id) && u.emailVerified !== false)
+    .filter(u => {
+      if (excluded.has(u.id) || u.emailVerified === false) return false;
+      // Filter out offline seeded users
+      if (u.id && u.id.startsWith('seed_') && !scheduler.isSeededUserOnline(u.id)) return false;
+      return true;
+    })
     .map(cleanUserForClient);
 
   return res.json({ success: true, users: candidates });
@@ -290,6 +313,19 @@ app.post('/discover/like', authMiddleware, async (req, res) => {
   currentUser.likes = Array.isArray(currentUser.likes) ? currentUser.likes : [];
   if (!currentUser.likes.includes(targetUser.id)) {
     currentUser.likes.push(targetUser.id);
+  }
+
+  // Queue interaction if target is a seeded user and offline
+  if (targetUser.id && targetUser.id.startsWith('seed_')) {
+    const wasQueued = scheduler.queueInteractionIfOffline(targetUser.id, {
+      type: 'like',
+      fromUserId: currentUser.id,
+      fromName: currentUser.name
+    });
+    if (wasQueued) {
+      await saveUsers(users);
+      return res.json({ success: true, isMatch: false, message: 'Like sent! They will see it when they come online.' });
+    }
   }
 
   const mutualLike = Array.isArray(targetUser.likes) && targetUser.likes.includes(currentUser.id);
@@ -332,6 +368,50 @@ app.post('/discover/pass', authMiddleware, async (req, res) => {
 
   await saveUsers(users);
   return res.json({ success: true, message: 'Pass recorded' });
+});
+
+app.post('/discover/superlike', authMiddleware, async (req, res) => {
+  const { targetId } = req.body;
+  if (!targetId) {
+    return res.status(400).json({ success: false, message: 'Missing targetId' });
+  }
+
+  const users = await loadUsers();
+  const currentUser = users.find(u => u.id === req.userId);
+  const targetUser = users.find(u => u.id === String(targetId));
+  if (!currentUser || !targetUser) {
+    return res.status(404).json({ success: false, message: 'User not found' });
+  }
+
+  currentUser.superLikes = Array.isArray(currentUser.superLikes) ? currentUser.superLikes : [];
+  if (!currentUser.superLikes.includes(targetUser.id)) {
+    currentUser.superLikes.push(targetUser.id);
+  }
+
+  currentUser.likes = Array.isArray(currentUser.likes) ? currentUser.likes : [];
+  if (!currentUser.likes.includes(targetUser.id)) {
+    currentUser.likes.push(targetUser.id);
+  }
+
+  const mutualLike = Array.isArray(targetUser.likes) && targetUser.likes.includes(currentUser.id);
+  let isMatch = false;
+
+  if (mutualLike) {
+    currentUser.matches = Array.isArray(currentUser.matches) ? currentUser.matches : [];
+    targetUser.matches = Array.isArray(targetUser.matches) ? targetUser.matches : [];
+    if (!currentUser.matches.includes(targetUser.id)) currentUser.matches.push(targetUser.id);
+    if (!targetUser.matches.includes(currentUser.id)) targetUser.matches.push(currentUser.id);
+    isMatch = true;
+
+    const timestamp = Date.now();
+    currentUser.notifications = Array.isArray(currentUser.notifications) ? currentUser.notifications : [];
+    targetUser.notifications = Array.isArray(targetUser.notifications) ? targetUser.notifications : [];
+    currentUser.notifications.push({ id: `notif-${timestamp}-${Math.random().toString(36).slice(2, 8)}`, type: 'match', text: `You matched with ${targetUser.name}!`, timestamp, read: false });
+    targetUser.notifications.push({ id: `notif-${timestamp}-${Math.random().toString(36).slice(2, 8)}`, type: 'match', text: `You matched with ${currentUser.name}!`, timestamp, read: false });
+  }
+
+  await saveUsers(users);
+  return res.json({ success: true, isMatch, message: isMatch ? `Super like matched with ${targetUser.name}!` : 'Super like sent' });
 });
 
 app.get('/matches', authMiddleware, async (req, res) => {
@@ -392,10 +472,13 @@ app.get('/messages/conversation/:contactId', authMiddleware, async (req, res) =>
   return res.json({ success: true, messages: conversation });
 });
 
-app.post('/messages/send', authMiddleware, async (req, res) => {
+app.post('/messages/send', authMiddleware, upload.single('photo'), async (req, res) => {
   const { recipientId, text } = req.body;
-  if (!recipientId || !text || !text.trim()) {
-    return res.status(400).json({ success: false, message: 'recipientId and text are required' });
+  const photo = req.file ? `/uploads/${req.file.filename}` : '';
+  const trimmedText = String(text || '').trim();
+
+  if (!recipientId || (!trimmedText && !photo)) {
+    return res.status(400).json({ success: false, message: 'recipientId and text or photo are required' });
   }
 
   const users = await loadUsers();
@@ -409,7 +492,8 @@ app.post('/messages/send', authMiddleware, async (req, res) => {
     id: getRandomId(),
     from: req.userId,
     to: recipient.id,
-    text: sanitizeString(text),
+    text: sanitizeString(trimmedText),
+    photo,
     timestamp: Date.now(),
   };
   messages.push(message);
@@ -533,10 +617,66 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
+// Socket.io connection handling
+io.on('connection', (socket) => {
+  console.log(`User connected: ${socket.id}`);
+
+  socket.on('disconnect', () => {
+    console.log(`User disconnected: ${socket.id}`);
+  });
+
+  socket.on('request_status_check', async () => {
+    try {
+      const users = await loadUsers();
+      const statuses = users
+        .filter(u => u.id && u.id.startsWith('seed_'))
+        .map(u => ({
+          userId: u.id,
+          isOnline: scheduler.isSeededUserOnline(u.id),
+          name: u.name
+        }));
+      socket.emit('status_check_response', statuses);
+    } catch (err) {
+      console.error('Error in status check:', err);
+    }
+  });
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ success: true, status: 'ok' });
+});
+
+// Seeded user status endpoint
+app.get('/seed-users/status', async (req, res) => {
+  try {
+    const users = await loadUsers();
+    scheduler.initializeAllSeededUsers(users);
+    const statuses = scheduler.getStatusSummary();
+    res.json({ success: true, statuses });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Unable to retrieve statuses' });
+  }
+});
+
 async function start() {
   await ensureStorage();
-  app.listen(PORT, '0.0.0.0', () => {
+  
+  // Initialize seeded user scheduler on startup
+  const users = await loadUsers();
+  scheduler.setIoInstance(io);
+  scheduler.initializeAllSeededUsers(users);
+  console.log('Seeded user scheduler initialized');
+
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`Custom backend running on http://0.0.0.0:${PORT}`);
+  });
+
+  // Graceful shutdown
+  process.on('SIGTERM', () => {
+    console.log('SIGTERM received, shutting down gracefully');
+    scheduler.stopAllSchedulers();
+    process.exit(0);
   });
 }
 

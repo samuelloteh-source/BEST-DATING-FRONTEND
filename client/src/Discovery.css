@@ -1,9 +1,10 @@
 .discovery-container {
-  min-height: 100vh;
+  min-height: 0;
   background: linear-gradient(135deg, #000 0%, #1a1a1a 100%);
-  padding: 20px;
+  padding: 0 20px 20px;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .discovery-header {
@@ -30,23 +31,6 @@
 .user-info span {
   font-size: 14px;
   color: #999;
-}
-
-.logout-btn {
-  padding: 8px 16px;
-  background: #ff006d;
-  color: white;
-  border: none;
-  border-radius: 20px;
-  cursor: pointer;
-  font-weight: 600;
-  font-size: 12px;
-  transition: all 0.3s ease;
-}
-
-.logout-btn:hover {
-  background: #ff1a80;
-  transform: scale(1.05);
 }
 
 .match-message {
@@ -80,19 +64,83 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  margin-bottom: 30px;
+  margin-bottom: 0;
+  min-height: 0;
+}
+
+.filter-panel {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 22px;
+  color: white;
+}
+
+.filter-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.filter-row label {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 140px;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.filter-row input {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.08);
+  color: white;
+}
+
+.interests-filter {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.interest-button {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #fff;
+  border-radius: 999px;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.interest-button.active {
+  background: #ff006d;
+  border-color: #ff5ca8;
+  transform: translateY(-1px);
+}
+
+.filter-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.filter-actions span {
+  color: #ccc;
+  font-size: 13px;
 }
 
 .discovery-card,
-.card-stack {
-  touch-action: pan-y;
-  -webkit-user-drag: none;
-  user-drag: none;
-}
-
+.card-stack,
 .card-image,
-.card-image img {
-  touch-action: none;
+.card-image img,
+.card-overlay,
+.card-actions-overlay {
+  touch-action: pan-y;
   -webkit-user-drag: none;
   user-drag: none;
 }
@@ -100,6 +148,7 @@
 .discovery-card {
   width: 100%;
   max-width: 380px;
+  height: 100%;
   border-radius: 20px;
   overflow: hidden;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
@@ -126,7 +175,8 @@ html, body, #root {
 .card-image {
   position: relative;
   width: 100%;
-  height: 520px;
+  height: 58%;
+  min-height: 320px;
   overflow: hidden;
   background: #222;
 }
@@ -181,14 +231,163 @@ html, body, #root {
   font-weight: 500;
 }
 
+.online-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #ccc;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 12px;
+  width: fit-content;
+}
+
+.online-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #999;
+  transition: background 0.3s ease;
+}
+
+.online-dot.online {
+  background: #4ade80;
+  box-shadow: 0 0 8px rgba(74, 222, 128, 0.6);
+}
+
+.online-dot.offline {
+  background: #999;
+}
+
 .card-info {
   padding: 20px;
   background: white;
-  max-height: 200px;
-  overflow-y: auto;
+  max-height: 170px;
+  overflow: hidden;
   touch-action: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+}
+
+.card-info-btn {
+  display: inline-flex;
+  margin-top: 16px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: none;
+  background: #ff006d;
+  color: white;
+  cursor: pointer;
+  font-weight: 700;
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.card-info-btn:hover {
+  transform: translateY(-1px);
+  background: #ff3d92;
+}
+
+.profile-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+  z-index: 10000;
+}
+
+.profile-modal {
+  width: min(700px, 100%);
+  max-height: min(90vh, 900px);
+  overflow-y: auto;
+  background: #0f0f17;
+  border-radius: 28px;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  position: relative;
+}
+
+.modal-close-btn {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.profile-modal-image {
+  width: 100%;
+  min-height: 320px;
+  background: #111;
+  overflow: hidden;
+}
+
+.profile-modal-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile-modal-content {
+  padding: 24px 28px 28px;
+  color: #f8fafc;
+}
+
+.profile-modal-content h2 {
+  margin: 0;
+  font-size: 32px;
+  letter-spacing: -0.5px;
+}
+
+.modal-location,
+.modal-age {
+  margin: 10px 0 0;
+  font-size: 14px;
+  color: #cbd5e1;
+}
+
+.profile-modal-content h3 {
+  margin: 22px 0 10px;
+  font-size: 16px;
+  color: #e2e8f0;
+}
+
+.profile-modal-content p {
+  margin: 0;
+  line-height: 1.75;
+  color: #d1d5db;
+}
+
+.modal-tags {
+  margin-top: 12px;
+}
+
+@media (max-width: 720px) {
+  .card-stack {
+    min-height: calc(100vh - 220px);
+  }
+  .card-info {
+    max-height: none;
+  }
+  .card-image {
+    height: 420px;
+  }
+  .profile-modal {
+    max-height: 90vh;
+  }
+  .profile-modal-content {
+    padding: 18px 18px 22px;
+  }
 }
 
 .bio {
@@ -232,6 +431,7 @@ html, body, #root {
 }
 
 .pass-btn,
+.superlike-btn,
 .like-btn {
   width: 70px;
   height: 70px;
@@ -260,6 +460,18 @@ html, body, #root {
   transform: scale(1.08);
 }
 
+.superlike-btn {
+  border-color: #17a2ff;
+  color: #17a2ff;
+  background: rgba(23, 162, 255, 0.18);
+}
+
+.superlike-btn:hover {
+  background: #17a2ff;
+  color: white;
+  transform: scale(1.08);
+}
+
 .like-btn {
   border-color: #ff006d;
   background: rgba(255, 0, 109, 0.14);
@@ -275,6 +487,12 @@ html, body, #root {
   color: #ddd;
   text-align: center;
   margin-bottom: 20px;
+}
+
+@media (max-width: 840px) {
+  .filter-row {
+    flex-direction: column;
+  }
 }
 
 .card-counter {
