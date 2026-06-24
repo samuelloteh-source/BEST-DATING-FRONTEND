@@ -18,7 +18,12 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
   const [deleteMessage, setDeleteMessage] = useState('')
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' })
   const [deletePassword, setDeletePassword] = useState('')
+  const [showProfileEditor, setShowProfileEditor] = useState(false)
+  const [showPasswordEditor, setShowPasswordEditor] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [gallery, setGallery] = useState([])
+  const [galleryUploading, setGalleryUploading] = useState(false)
+  const [galleryMessage, setGalleryMessage] = useState('')
 
   useEffect(() => {
     if (!user) return
@@ -28,7 +33,69 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
       bio: user.bio || '',
       interests: Array.isArray(user.interests) ? user.interests : []
     })
+    setGallery(Array.isArray(user.gallery) ? user.gallery : [])
+    fetchGallery()
   }, [user])
+
+  const fetchGallery = async () => {
+    try {
+      const res = await axios.get('/profile/gallery')
+      if (res.data?.success) {
+        setGallery(res.data.gallery || [])
+      }
+    } catch (err) {
+      console.error('Failed to load gallery:', err)
+    }
+  }
+
+  const uploadGalleryFiles = async (files) => {
+    if (!files || files.length === 0) return
+    setGalleryMessage('')
+    setGalleryUploading(true)
+
+    try {
+      const uploadedImages = []
+      for (const file of files) {
+        const formData = new FormData()
+        formData.append('image', file)
+        const res = await axios.post('/profile/gallery', formData)
+        if (res.data?.success) {
+          uploadedImages.push(res.data.image)
+        }
+      }
+      if (uploadedImages.length) {
+        // Verify by re-fetching the gallery from the server to ensure backend saved files
+        await fetchGallery()
+        setGalleryMessage(`Added ${uploadedImages.length} photo${uploadedImages.length === 1 ? '' : 's'} to your gallery.`)
+      }
+    } catch (err) {
+      console.error('Gallery upload failed:', err)
+      setGalleryMessage('Could not upload photos. Please try again.')
+    } finally {
+      setGalleryUploading(false)
+    }
+  }
+
+  const handleGalleryFileChange = (event) => {
+    const files = Array.from(event.target.files || [])
+    if (files.length === 0) return
+    uploadGalleryFiles(files)
+    event.target.value = null
+  }
+
+  const handleDeleteGalleryImage = async (imageId) => {
+    if (!imageId) return
+    try {
+      const res = await axios.delete(`/profile/gallery/${imageId}`)
+      if (res.data?.success) {
+        setGallery((prev) => prev.filter((image) => image.id !== imageId))
+        setGalleryMessage('Photo removed from your gallery.')
+      }
+    } catch (err) {
+      console.error('Failed to delete gallery image:', err)
+      setGalleryMessage('Could not remove photo. Please try again.')
+    }
+  }
 
   useEffect(() => {
     setFilterForm(discoverFilters)
@@ -164,30 +231,14 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
   }
 
   return (
-    <div className="profile-page">
-      <div className="profile-hero relative min-h-[320px] sm:min-h-[420px] overflow-hidden">
-        <img
-          src={user.avatar || user.photo || 'https://via.placeholder.com/1600x900?text=Profile+image'}
-          alt={`${user.name} profile`}
-          className="absolute inset-0 h-full w-full object-cover"
-        />
-        <div className="absolute inset-0 bg-black/35" />
-        <div className="relative z-10 flex h-full items-end px-4 pb-8 sm:px-6 lg:px-8">
-          <div className="max-w-5xl text-white">
-            <p className="text-xs uppercase tracking-[0.28em] text-white/70">Profile</p>
-            <h1 className="mt-3 text-4xl font-semibold sm:text-5xl">{user.name}</h1>
-            <p className="mt-3 max-w-2xl text-sm text-white/80">{user.bio || 'Your profile photo is the first impression. Keep it fresh and upbeat.'}</p>
-          </div>
-        </div>
-      </div>
-
+    <div className="profile-page" style={{ backgroundColor: '#1a1a1a' }}>
       <div className="max-w-5xl mx-auto px-4 pt-6 pb-6 sm:px-6 lg:px-8">
         <div className="space-y-8">
           <section className="rounded-[32px] border border-white/15 bg-white/10 p-6 shadow-2xl shadow-black/10 backdrop-blur-xl">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-3xl font-semibold text-white">Profile</h2>
-                <p className="mt-2 text-sm text-slate-300">Manage your account and app preferences from one place.</p>
+                <h2 className="text-3xl font-semibold text-white">Profile settings</h2>
+                <p className="mt-2 text-sm text-slate-300">Update your profile and account preferences in one place.</p>
               </div>
               <div className="flex flex-col gap-2 text-right text-sm text-slate-300">
                 <span>{user.email}</span>
@@ -205,119 +256,199 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
 
           {settingsTab === 'profile' ? (
             <>
-              <form onSubmit={handleSaveProfile} className="rounded-[32px] border border-white/10 bg-black/20 p-6 shadow-lg shadow-black/10 backdrop-blur-xl">
-                <h3 className="text-2xl font-semibold text-white">Profile details</h3>
-                <div className="mt-6 grid gap-5 sm:grid-cols-2">
-                  <label className="space-y-2 text-sm text-slate-300">
-                    <span>Name</span>
-                    <input
-                      value={form.name}
-                      onChange={(e) => handleFormChange('name', e.target.value)}
-                      className="w-full rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-pink-400"
-                      placeholder="Your full name"
-                      required
-                    />
-                  </label>
-                  <label className="space-y-2 text-sm text-slate-300">
-                    <span>Avatar URL</span>
-                    <input
-                      value={form.avatar}
-                      onChange={(e) => handleFormChange('avatar', e.target.value)}
-                      className="w-full rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-pink-400"
-                      placeholder="https://"
-                    />
-                  </label>
-                </div>
-
-                <label className="mt-5 block text-sm text-slate-300">
-                  <span>About you</span>
-                  <textarea
-                    value={form.bio}
-                    onChange={(e) => handleFormChange('bio', e.target.value)}
-                    className="mt-2 h-32 w-full rounded-[28px] border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-pink-400"
-                    placeholder="Tell your next match what makes you unique."
-                  />
-                </label>
-
-                <div className="mt-5">
-                  <div className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">Interests</div>
-                  <div className="flex flex-wrap gap-2">
-                    {interestOptions.map((interest) => {
-                      const active = form.interests.includes(interest)
-                      return (
-                        <button
-                          type="button"
-                          key={interest}
-                          className={`rounded-full px-4 py-2 text-sm transition ${active ? 'bg-pink-500 text-white' : 'bg-white/10 text-slate-200 hover:bg-white/20'}`}
-                          onClick={() => toggleInterest(interest)}
-                        >
-                          {interest}
-                        </button>
-                      )
-                    })}
+              <div className="rounded-[32px] border border-white/10 bg-black/20 p-6 shadow-lg shadow-black/10 backdrop-blur-xl">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-2xl font-semibold text-white">Profile overview</h3>
+                    <p className="mt-2 text-sm text-slate-300">Tap the button to edit your profile details.</p>
                   </div>
-                  <p className="mt-2 text-xs text-slate-400">Select up to {MAX_INTERESTS} interests.</p>
-                </div>
-
-                <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <button
-                    type="submit"
-                    disabled={loading}
-                    className="inline-flex items-center justify-center rounded-3xl bg-gradient-to-r from-pink-500 to-orange-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-pink-500/25 transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-50"
+                    type="button"
+                    onClick={() => setShowProfileEditor((prev) => !prev)}
+                    className="inline-flex items-center justify-center rounded-3xl bg-gradient-to-r from-pink-500 to-orange-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-pink-500/25 transition hover:scale-[1.01]"
                   >
-                    Save profile
+                    {showProfileEditor ? 'Hide profile editor' : 'Edit profile details'}
                   </button>
-                  {message && <p className="text-sm text-emerald-300">{message}</p>}
                 </div>
-              </form>
+              </div>
 
-              <form onSubmit={handleChangePassword} className="rounded-[32px] border border-white/10 bg-black/20 p-6 shadow-lg shadow-black/10 backdrop-blur-xl">
-                <h3 className="text-2xl font-semibold text-white">Change password</h3>
-                <div className="mt-6 grid gap-5 sm:grid-cols-3">
-                  <label className="space-y-2 text-sm text-slate-300">
-                    <span>Current password</span>
-                    <input
-                      type="password"
-                      value={passwordForm.currentPassword}
-                      onChange={(e) => setPasswordForm(prev => ({ ...prev, currentPassword: e.target.value }))}
-                      className="w-full rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none"
-                      required
+              {showProfileEditor && (
+                <form onSubmit={handleSaveProfile} className="mt-6 rounded-[32px] border border-white/10 bg-black/20 p-6 shadow-lg shadow-black/10 backdrop-blur-xl">
+                  <h3 className="text-2xl font-semibold text-white">Profile details</h3>
+                  <div className="mt-6 grid gap-5 sm:grid-cols-2">
+                    <label className="space-y-2 text-sm text-slate-300">
+                      <span>Name</span>
+                      <input
+                        value={form.name}
+                        onChange={(e) => handleFormChange('name', e.target.value)}
+                        className="w-full rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-pink-400"
+                        placeholder="Your full name"
+                        required
+                      />
+                    </label>
+                    <label className="space-y-2 text-sm text-slate-300">
+                      <span>Avatar URL</span>
+                      <input
+                        value={form.avatar}
+                        onChange={(e) => handleFormChange('avatar', e.target.value)}
+                        className="w-full rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-pink-400"
+                        placeholder="https://"
+                      />
+                    </label>
+                  </div>
+
+                  <label className="mt-5 block text-sm text-slate-300">
+                    <span>About you</span>
+                    <textarea
+                      value={form.bio}
+                      onChange={(e) => handleFormChange('bio', e.target.value)}
+                      className="mt-2 h-32 w-full rounded-[28px] border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-pink-400"
+                      placeholder="Tell your next match what makes you unique."
                     />
                   </label>
-                  <label className="space-y-2 text-sm text-slate-300">
-                    <span>New password</span>
-                    <input
-                      type="password"
-                      value={passwordForm.newPassword}
-                      onChange={(e) => setPasswordForm(prev => ({ ...prev, newPassword: e.target.value }))}
-                      className="w-full rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none"
-                      required
-                    />
-                  </label>
-                  <label className="space-y-2 text-sm text-slate-300">
-                    <span>Confirm new</span>
-                    <input
-                      type="password"
-                      value={passwordForm.confirmPassword}
-                      onChange={(e) => setPasswordForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
-                      className="w-full rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none"
-                      required
-                    />
-                  </label>
-                </div>
-                <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+
+                  <div className="mt-5">
+                    <div className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-slate-300">Interests</div>
+                    <div className="flex flex-wrap gap-2">
+                      {interestOptions.map((interest) => {
+                        const active = form.interests.includes(interest)
+                        return (
+                          <button
+                            type="button"
+                            key={interest}
+                            className={`rounded-full px-4 py-2 text-sm transition ${active ? 'bg-pink-500 text-white' : 'bg-white/10 text-slate-200 hover:bg-white/20'}`}
+                            onClick={() => toggleInterest(interest)}
+                          >
+                            {interest}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <p className="mt-2 text-xs text-slate-400">Select up to {MAX_INTERESTS} interests.</p>
+                  </div>
+
+                  <div className="mt-6 rounded-[28px] border border-white/10 bg-white/5 p-5">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <h4 className="text-lg font-semibold text-white">Photo gallery</h4>
+                        <p className="mt-1 text-sm text-slate-400">Upload more pictures to your profile gallery.</p>
+                      </div>
+                      <span className="text-xs uppercase tracking-[0.18em] text-slate-400">{gallery.length} photos</span>
+                    </div>
+
+                    <label className="mt-4 block text-sm text-slate-300">
+                      <span className="mb-2 block">Add photos</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        disabled={galleryUploading}
+                        onChange={handleGalleryFileChange}
+                        className="w-full rounded-3xl border border-white/10 bg-black/80 px-4 py-3 text-white outline-none"
+                      />
+                    </label>
+
+                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                      {gallery.length === 0 ? (
+                        <div className="rounded-3xl border border-dashed border-white/15 bg-black/40 p-5 text-sm text-slate-400">No gallery photos yet.</div>
+                      ) : (
+                        gallery.map((image) => (
+                          <div key={image.id} className="relative overflow-hidden rounded-3xl border border-white/10 bg-slate-950">
+                            <img src={image.url} alt="Gallery" className="h-28 w-full object-cover" />
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteGalleryImage(image.id)}
+                              className="absolute right-2 top-2 rounded-full bg-black/70 px-2 py-1 text-xs font-semibold text-white transition hover:bg-black"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    {galleryMessage && <p className="mt-3 text-sm text-emerald-300">{galleryMessage}</p>}
+                    {galleryUploading && <p className="mt-3 text-sm text-slate-400">Uploading photos…</p>}
+                  </div>
+
+                  <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="inline-flex items-center justify-center rounded-3xl bg-gradient-to-r from-pink-500 to-orange-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-pink-500/25 transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Save profile
+                    </button>
+                    {message && <p className="text-sm text-emerald-300">{message}</p>}
+                  </div>
+                </form>
+              )}
+
+              <div className="mt-6 rounded-[32px] border border-white/10 bg-black/20 p-6 shadow-lg shadow-black/10 backdrop-blur-xl">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-2xl font-semibold text-white">Password</h3>
+                    <p className="mt-2 text-sm text-slate-300">Only open this section when you want to update your password.</p>
+                  </div>
                   <button
-                    type="submit"
-                    disabled={loading}
-                    className="inline-flex items-center justify-center rounded-3xl bg-white/10 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    type="button"
+                    onClick={() => setShowPasswordEditor((prev) => !prev)}
+                    className="inline-flex items-center justify-center rounded-3xl bg-white/10 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/20"
                   >
-                    Save password
+                    {showPasswordEditor ? 'Hide password editor' : 'Change password'}
                   </button>
-                  {passwordMessage && <p className="text-sm text-slate-300">{passwordMessage}</p>}
                 </div>
-              </form>
+              </div>
 
-              <form onSubmit={handleDeleteAccount} className="rounded-[32px] border border-red-500/25 bg-[#1f061a]/90 p-6 shadow-lg shadow-red-500/10 backdrop-blur-xl">
+              {showPasswordEditor && (
+                <form onSubmit={handleChangePassword} className="mt-6 rounded-[32px] border border-white/10 bg-black/20 p-6 shadow-lg shadow-black/10 backdrop-blur-xl">
+                  <h3 className="text-2xl font-semibold text-white">Change password</h3>
+                  <div className="mt-6 grid gap-5 sm:grid-cols-3">
+                    <label className="space-y-2 text-sm text-slate-300">
+                      <span>Current password</span>
+                      <input
+                        type="password"
+                        value={passwordForm.currentPassword}
+                        onChange={(e) => setPasswordForm(prev => ({ ...prev, currentPassword: e.target.value }))}
+                        className="w-full rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none"
+                        required
+                      />
+                    </label>
+                    <label className="space-y-2 text-sm text-slate-300">
+                      <span>New password</span>
+                      <input
+                        type="password"
+                        value={passwordForm.newPassword}
+                        onChange={(e) => setPasswordForm(prev => ({ ...prev, newPassword: e.target.value }))}
+                        className="w-full rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none"
+                        required
+                      />
+                    </label>
+                    <label className="space-y-2 text-sm text-slate-300">
+                      <span>Confirm new</span>
+                      <input
+                        type="password"
+                        value={passwordForm.confirmPassword}
+                        onChange={(e) => setPasswordForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                        className="w-full rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none"
+                        required
+                      />
+                    </label>
+                  </div>
+                  <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="inline-flex items-center justify-center rounded-3xl bg-white/10 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Save password
+                    </button>
+                    {passwordMessage && <p className="text-sm text-slate-300">{passwordMessage}</p>}
+                  </div>
+                </form>
+              )}
+
+              <form onSubmit={handleDeleteAccount} className="mt-6 rounded-[32px] border border-red-500/25 bg-[#1f061a]/90 p-6 shadow-lg shadow-red-500/10 backdrop-blur-xl">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h3 className="text-2xl font-semibold text-white">Delete account</h3>

@@ -97,12 +97,134 @@ function scheduleNextStatusChange(userId) {
 
 // Global io instance for broadcasting
 let globalIo = null;
+let globalResponseHandlers = {
+  autoLike: null,
+  sendMessage: null,
+};
+
+const RESPONSE_KEYWORDS = [
+  {
+    keywords: ['hi', 'hello', 'hey', 'hiya', 'hola', 'howdy'],
+    responses: [
+      'Hey there! What are you up to today?',
+      'Hi! I was just browsing profiles — how are you?',
+      'Hello! Tell me something fun about your day.',
+    ]
+  },
+  {
+    keywords: ['how are you', 'how r you', 'how r u', 'how are u'],
+    responses: [
+      'I’m doing great, thanks! How about you?',
+      'Feeling good today — what about you?',
+      'I’m doing well! What’s been the best part of your day?',
+    ]
+  },
+  {
+    keywords: ['work', 'job', 'career', 'office', 'boss'],
+    responses: [
+      'Work life can be wild. What do you enjoy most about your job?',
+      'That sounds interesting — what made you choose that career?',
+      'Tell me more about what you do. I love hearing about people’s passions.',
+    ]
+  },
+  {
+    keywords: ['music', 'song', 'band', 'concert'],
+    responses: [
+      'Music is such a vibe. What song can you not stop playing?',
+      'I love a good playlist. What was the last concert you went to?',
+      'Do you have a favorite band or artist right now?',
+    ]
+  },
+  {
+    keywords: ['movie', 'film', 'show', 'series', 'tv'],
+    responses: [
+      'I’m always looking for a good show. Any recommendations?',
+      'Movies are perfect for a cozy night. What’s your favorite?',
+      'I love a great series. What have you watched lately?',
+    ]
+  },
+  {
+    keywords: ['travel', 'trip', 'vacation', 'journey', 'flight'],
+    responses: [
+      'Travel is the best. Where was your last adventure?',
+      'I love exploring new places — what’s at the top of your bucket list?',
+      'Any dream destination you’d love to visit next?',
+    ]
+  },
+  {
+    keywords: ['food', 'restaurant', 'eat', 'dinner', 'lunch', 'coffee'],
+    responses: [
+      'Food talk is my favorite. What’s your go-to meal?',
+      'I enjoy trying new places. Any favorite restaurant near you?',
+      'Are you more of a coffee or dessert person?',
+    ]
+  },
+  {
+    keywords: ['pet', 'dog', 'cat', 'animals', 'puppy', 'kitten'],
+    responses: [
+      'I love animals too! Do you have any pets?',
+      'Pets make life better — are you a dog person or a cat person?',
+      'Tell me about your furry friend if you have one!',
+    ]
+  },
+  {
+    keywords: ['weekend', 'party', 'fun', 'hobby', 'hobbies', 'sports'],
+    responses: [
+      'Weekends are perfect for relaxing. What do you usually do?',
+      'That sounds fun. What’s your favorite hobby?',
+      'I’m always up for trying new things. What’s a hobby you love?',
+    ]
+  },
+  {
+    keywords: ['photo', 'pic', 'picture', 'selfie'],
+    responses: [
+      'Your profile pic is great! What’s the story behind it?',
+      'You have a nice photo — do you enjoy photography?',
+      'Selfies are fun. What made you choose that one?',
+    ]
+  }
+];
+
+function pickSeedResponseForMessage(incomingText, fromName = '') {
+  const text = String(incomingText || '').toLowerCase().trim();
+  const safeName = fromName ? ` ${fromName}` : '';
+  let chosenResponses = [];
+
+  for (const rule of RESPONSE_KEYWORDS) {
+    if (rule.keywords.some(keyword => text.includes(keyword))) {
+      chosenResponses = rule.responses;
+      break;
+    }
+  }
+
+  if (!chosenResponses.length) {
+    chosenResponses = [
+      `That’s interesting${safeName}! Tell me more about it.`,
+      `I like hearing that${safeName}. What else do you enjoy?`,
+      `Nice! I’d love to know more about that.`,
+      `Cool! How did you get into that?`,
+    ];
+  }
+
+  const response = chosenResponses[Math.floor(Math.random() * chosenResponses.length)];
+  return response.replace('{name}', fromName || 'there');
+}
 
 /**
  * Set the Socket.io instance for broadcasting status changes
  */
 function setIoInstance(io) {
   globalIo = io;
+}
+
+/**
+ * Set persistence handlers for seeded responses
+ */
+function setResponseHandlers(handlers = {}) {
+  globalResponseHandlers = {
+    ...globalResponseHandlers,
+    ...handlers,
+  };
 }
 
 /**
@@ -139,21 +261,27 @@ function queueInteractionIfOffline(userId, interaction) {
   if (!seededUserState[userId]) initializeSeededUser(userId);
 
   const state = seededUserState[userId];
-  if (!state.isOnline) {
-    state.pendingInteractions.push({
-      ...interaction,
-      timestamp: Date.now()
-    });
-    return true; // Was queued
+  state.pendingInteractions.push({
+    ...interaction,
+    timestamp: Date.now()
+  });
+
+  if (state.isOnline) {
+    scheduleResponsesToInteractions(userId, state.pendingInteractions);
+    return false; // handled immediately
   }
-  return false; // User is online, no queueing needed
+
+  return true; // queued until user comes online
 }
 
 /**
  * Schedule delayed responses when a user comes online
  */
-function scheduleResponsesToInteractions(userId, pendingInteractions, io = null, loadUsersFunc = null, sendMessageFunc = null) {
+function scheduleResponsesToInteractions(userId, pendingInteractions, io = null, autoLikeFunc = null, sendMessageFunc = null) {
   if (pendingInteractions.length === 0) return;
+
+  const autoLikeHandler = autoLikeFunc || globalResponseHandlers.autoLike;
+  const sendMessageHandler = sendMessageFunc || globalResponseHandlers.sendMessage;
 
   // Pick 1-2 random interactions to respond to
   const numResponses = Math.min(1 + Math.floor(Math.random() * 2), pendingInteractions.length);
@@ -163,7 +291,6 @@ function scheduleResponsesToInteractions(userId, pendingInteractions, io = null,
     responsesToIndices.add(Math.floor(Math.random() * pendingInteractions.length));
   }
 
-  let responseCount = 0;
   responsesToIndices.forEach(idx => {
     const interaction = pendingInteractions[idx];
     const responseDelay = CONFIG.RESPONSE_DELAY_MIN_MS + Math.random() * (CONFIG.RESPONSE_DELAY_MAX_MS - CONFIG.RESPONSE_DELAY_MIN_MS);
@@ -171,7 +298,9 @@ function scheduleResponsesToInteractions(userId, pendingInteractions, io = null,
     const responseTimer = setTimeout(async () => {
       try {
         if (interaction.type === 'like') {
-          // Respond with a like back
+          if (autoLikeHandler) {
+            await autoLikeHandler(userId, interaction.fromUserId);
+          }
           if (io) {
             io.emit('seed_auto_like', {
               seedUserId: userId,
@@ -180,10 +309,9 @@ function scheduleResponsesToInteractions(userId, pendingInteractions, io = null,
             });
           }
         } else if (interaction.type === 'message') {
-          // Send a starter message back
-          const message = CONFIG.STARTER_MESSAGES[Math.floor(Math.random() * CONFIG.STARTER_MESSAGES.length)];
-          if (sendMessageFunc) {
-            await sendMessageFunc(userId, interaction.fromUserId, message);
+          const message = pickSeedResponseForMessage(interaction.text, interaction.fromName);
+          if (sendMessageHandler) {
+            await sendMessageHandler(userId, interaction.fromUserId, message);
           }
           if (io) {
             io.emit('seed_auto_message', {
@@ -202,14 +330,10 @@ function scheduleResponsesToInteractions(userId, pendingInteractions, io = null,
     if (!timers[userId]) timers[userId] = {};
     if (!timers[userId].responseTimers) timers[userId].responseTimers = [];
     timers[userId].responseTimers.push(responseTimer);
-
-    responseCount++;
   });
 
   // Clear the pending interactions after scheduling responses
-  if (timers[userId]) {
-    pendingInteractions.length = 0;
-  }
+  pendingInteractions.length = 0;
 }
 
 /**
@@ -268,6 +392,7 @@ function getStatusSummary() {
 module.exports = {
   CONFIG,
   setIoInstance,
+  setResponseHandlers,
   initializeSeededUser,
   toggleUserStatus,
   scheduleNextStatusChange,

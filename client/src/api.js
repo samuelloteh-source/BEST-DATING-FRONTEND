@@ -9,4 +9,13 @@ export const apiBaseUrl = import.meta.env.VITE_API_URL || `${window.location.pro
 axios.defaults.baseURL = apiBaseUrl
 axios.defaults.withCredentials = false
 
+axios.interceptors.request.use((config) => {
+  const token = localStorage.getItem('authToken')
+  if (token) {
+    config.headers = config.headers || {}
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+}, (error) => Promise.reject(error))
+
 export default axios

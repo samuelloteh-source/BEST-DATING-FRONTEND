@@ -7,6 +7,23 @@ const path = require('path');
 const crypto = require('crypto');
 const http = require('http');
 const socketIo = require('socket.io');
+
+// Temporarily disable canvas/faceapi/tfjs due to native module compilation issues
+// Will re-enable once modules are properly built for Node 18
+let canvas, faceapi, tf;
+let canvasAvailable = false;
+
+try {
+  canvas = require('canvas');
+  faceapi = require('@vladmandic/face-api');
+  tf = require('@tensorflow/tfjs-node');
+  const { Canvas, Image, ImageData } = canvas;
+  faceapi.env.monkeyPatch({ Canvas, Image, ImageData });
+  canvasAvailable = true;
+} catch (err) {
+  console.warn('⚠️  Canvas/face-api modules not available - face verification disabled:', err.message);
+}
+
 const scheduler = require('./seeded-user-scheduler');
 
 const app = express();
@@ -63,6 +80,7 @@ function cleanUserForClient(user) {
     photo: safe.photo || '',
     avatar: safe.avatar || safe.photo || '',
     interests: Array.isArray(safe.interests) ? safe.interests : [],
+    gallery: Array.isArray(safe.gallery) ? safe.gallery : [],
     notifications: Array.isArray(safe.notifications) ? safe.notifications : [],
     likes: Array.isArray(safe.likes) ? safe.likes : [],
     passed: Array.isArray(safe.passed) ? safe.passed : [],
@@ -110,6 +128,53 @@ async function loadMessages() {
 
 async function saveMessages(messages) {
   await writeJson(MESSAGES_FILE, messages);
+}
+
+async function persistSeedAutoLike(seedUserId, targetUserId) {
+  const users = await loadUsers();
+  const seedUser = users.find(u => u.id === seedUserId);
+  const targetUser = users.find(u => u.id === targetUserId);
+  if (!seedUser || !targetUser) return;
+
+  seedUser.likes = Array.isArray(seedUser.likes) ? seedUser.likes : [];
+  if (!seedUser.likes.includes(targetUserId)) {
+    seedUser.likes.push(targetUserId);
+  }
+
+  const mutualLike = Array.isArray(targetUser.likes) && targetUser.likes.includes(seedUserId);
+  if (mutualLike) {
+    seedUser.matches = Array.isArray(seedUser.matches) ? seedUser.matches : [];
+    targetUser.matches = Array.isArray(targetUser.matches) ? targetUser.matches : [];
+
+    if (!seedUser.matches.includes(targetUserId)) seedUser.matches.push(targetUserId);
+    if (!targetUser.matches.includes(seedUserId)) targetUser.matches.push(seedUserId);
+
+    const timestamp = Date.now();
+    seedUser.notifications = Array.isArray(seedUser.notifications) ? seedUser.notifications : [];
+    targetUser.notifications = Array.isArray(targetUser.notifications) ? targetUser.notifications : [];
+    seedUser.notifications.push({ id: `notif-${timestamp}-${Math.random().toString(36).slice(2, 8)}`, type: 'match', text: `You matched with ${targetUser.name}!`, timestamp, read: false });
+    targetUser.notifications.push({ id: `notif-${timestamp}-${Math.random().toString(36).slice(2, 8)}`, type: 'match', text: `You matched with ${seedUser.name}!`, timestamp, read: false });
+  }
+
+  await saveUsers(users);
+}
+
+async function persistSeedAutoMessage(seedUserId, targetUserId, text) {
+  const users = await loadUsers();
+  const seedUser = users.find(u => u.id === seedUserId);
+  const targetUser = users.find(u => u.id === targetUserId);
+  if (!seedUser || !targetUser) return;
+
+  const messages = await loadMessages();
+  messages.push({
+    id: getRandomId(),
+    from: seedUserId,
+    to: targetUserId,
+    text: sanitizeString(text || ''),
+    photo: '',
+    timestamp: Date.now(),
+  });
+  await saveMessages(messages);
 }
 
 function getAuthToken(req) {
@@ -171,7 +236,7 @@ app.get('/me', authMiddleware, async (req, res) => {
   return res.json({ success: true, user: cleanUserForClient(req.user) });
 });
 
-app.post('/signup', upload.single('photo'), async (req, res) => {
+app.post('/signup', upload.array('photos', 10), async (req, res) => {
   try {
     const { name, dob, email, password, country, state, bio, interests } = req.body;
     const normalizedEmail = normalizeEmail(email);
@@ -191,7 +256,9 @@ app.post('/signup', upload.single('photo'), async (req, res) => {
         ? interests.map(i => sanitizeString(i)).filter(Boolean)
         : [];
 
-    const photoPath = req.file ? `/uploads/${req.file.filename}` : '';
+    const files = Array.isArray(req.files) ? req.files : [];
+    const photoPaths = files.map((file) => `/uploads/${file.filename}`);
+    const photoPath = photoPaths.length > 0 ? photoPaths[0] : '';
     const passwordHash = await bcrypt.hash(password, 10);
 
     const newUser = {
@@ -206,6 +273,7 @@ app.post('/signup', upload.single('photo'), async (req, res) => {
       interests: interestArray.slice(0, 5),
       photo: photoPath,
       avatar: photoPath,
+      gallery: photoPaths.map((url) => ({ id: getRandomId(), url })),
       likes: [],
       passed: [],
       matches: [],
@@ -224,6 +292,53 @@ app.post('/signup', upload.single('photo'), async (req, res) => {
     return res.status(500).json({ success: false, message: 'Unable to create account.' });
   }
 });
+
+// Face verification endpoint
+app.post('/verify/face', upload.fields([{ name: 'profile', maxCount: 1 }, { name: 'selfie', maxCount: 1 }]), async (req, res) => {
+  try {
+    if (!canvasAvailable) {
+      return res.status(503).json({ success: false, message: 'Face verification service temporarily unavailable' });
+    }
+
+    const profileFile = req.files && req.files.profile && req.files.profile[0]
+    const selfieFile = req.files && req.files.selfie && req.files.selfie[0]
+    if (!profileFile || !selfieFile) return res.status(400).json({ success: false, message: 'Missing profile or selfie file' })
+
+    const profilePath = path.join(UPLOADS_DIR, profileFile.filename)
+    const selfiePath = path.join(UPLOADS_DIR, selfieFile.filename)
+
+    console.log('Verify files:', profilePath, selfiePath)
+    const profileImage = await canvas.loadImage(profilePath)
+    const selfieImage = await canvas.loadImage(selfiePath)
+
+    const profileResult = await faceapi.detectSingleFace(profileImage).withFaceLandmarks().withFaceDescriptor()
+    const selfieResult = await faceapi.detectSingleFace(selfieImage).withFaceLandmarks().withFaceDescriptor()
+
+    if (!profileResult || !profileResult.descriptor) {
+      return res.status(400).json({ success: false, message: 'No face detected in profile photo' })
+    }
+    if (!selfieResult || !selfieResult.descriptor) {
+      return res.status(400).json({ success: false, message: 'No face detected in selfie' })
+    }
+
+    const distance = faceapi.euclideanDistance(profileResult.descriptor, selfieResult.descriptor)
+    const match = distance < 0.55
+    const score = Math.max(0, 1 - distance)
+
+    return res.json({
+      success: true,
+      match,
+      score,
+      distance,
+      profileFaceDetected: true,
+      selfieFaceDetected: true,
+      threshold: 0.55,
+    })
+  } catch (err) {
+    console.error('Face verification error:', err)
+    return res.status(500).json({ success: false, message: 'Verification error' })
+  }
+})
 
 app.post('/login', async (req, res) => {
   try {
@@ -439,6 +554,48 @@ app.get('/notifications', authMiddleware, async (req, res) => {
   return res.json({ success: true, notifications: currentUser.notifications || [] });
 });
 
+app.get('/messages/threads', authMiddleware, async (req, res) => {
+  const users = await loadUsers();
+  const currentUser = users.find(u => String(u.id) === String(req.userId));
+  if (!currentUser) {
+    return res.status(404).json({ success: false, message: 'User not found' });
+  }
+
+  const messages = await loadMessages();
+  const threadMap = new Map();
+
+  messages
+    .filter(msg => String(msg.from) === String(req.userId) || String(msg.to) === String(req.userId))
+    .forEach((msg) => {
+      const partnerId = String(msg.from) === String(req.userId) ? String(msg.to) : String(msg.from);
+      const current = threadMap.get(partnerId) || {
+        id: partnerId,
+        lastMessage: '',
+        lastTimestamp: 0,
+      };
+
+      if (!current.name || msg.timestamp > current.lastTimestamp) {
+        const partner = users.find(u => String(u.id) === partnerId);
+        if (partner) {
+          current.name = partner.name || 'Unknown';
+          current.photo = partner.photo || partner.avatar || '';
+        }
+      }
+
+      if (msg.timestamp >= current.lastTimestamp) {
+        current.lastTimestamp = msg.timestamp;
+        current.lastMessage = msg.text ? msg.text : (msg.photo ? '📷 Photo' : '');
+      }
+
+      threadMap.set(partnerId, current);
+    });
+
+  const threads = Array.from(threadMap.values())
+    .sort((a, b) => b.lastTimestamp - a.lastTimestamp);
+
+  return res.json({ success: true, threads });
+});
+
 app.get('/likes', authMiddleware, async (req, res) => {
   const users = await loadUsers();
   const currentUser = users.find(u => u.id === req.userId);
@@ -499,6 +656,15 @@ app.post('/messages/send', authMiddleware, upload.single('photo'), async (req, r
   messages.push(message);
   await saveMessages(messages);
 
+  if (recipient.id && recipient.id.startsWith('seed_')) {
+    scheduler.queueInteractionIfOffline(recipient.id, {
+      type: 'message',
+      fromUserId: req.userId,
+      fromName: req.user?.name || '',
+      text: trimmedText
+    });
+  }
+
   return res.json({ success: true, message });
 });
 
@@ -537,6 +703,81 @@ app.put('/api/user/profile', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Profile update error:', err);
     return res.status(500).json({ success: false, message: 'Unable to update profile' });
+  }
+});
+
+app.get('/profile/gallery', authMiddleware, async (req, res) => {
+  try {
+    const user = req.user;
+    return res.json({ success: true, gallery: Array.isArray(user.gallery) ? user.gallery : [] });
+  } catch (err) {
+    console.error('Gallery fetch error:', err);
+    return res.status(500).json({ success: false, message: 'Unable to fetch gallery' });
+  }
+});
+
+app.post('/profile/gallery', authMiddleware, upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Missing image file' });
+    }
+
+    const users = await loadUsers();
+    const currentUser = users.find(u => u.id === req.userId);
+    if (!currentUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const image = { id: getRandomId(), url: `/uploads/${req.file.filename}` };
+    currentUser.gallery = Array.isArray(currentUser.gallery) ? currentUser.gallery : [];
+    currentUser.gallery.push(image);
+    await saveUsers(users);
+
+    return res.json({ success: true, image });
+  } catch (err) {
+    console.error('Gallery upload error:', err);
+    return res.status(500).json({ success: false, message: 'Unable to upload gallery image' });
+  }
+});
+
+app.delete('/profile/gallery/:id', authMiddleware, async (req, res) => {
+  try {
+    const imageId = req.params.id;
+    if (!imageId) {
+      return res.status(400).json({ success: false, message: 'Missing image id' });
+    }
+
+    const users = await loadUsers();
+    const currentUser = users.find(u => u.id === req.userId);
+    if (!currentUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const existingGallery = Array.isArray(currentUser.gallery) ? currentUser.gallery : [];
+    const imageToRemove = existingGallery.find((img) => img.id === imageId);
+    if (!imageToRemove) {
+      return res.status(404).json({ success: false, message: 'Image not found' });
+    }
+
+    currentUser.gallery = existingGallery.filter((img) => img.id !== imageId);
+    await saveUsers(users);
+
+    if (imageToRemove.url && imageToRemove.url.startsWith('/uploads/')) {
+      const filePath = path.join(__dirname, imageToRemove.url.replace('/uploads/', 'uploads/'));
+      try {
+        const stat = await fs.stat(filePath);
+        if (stat.isFile()) {
+          await fs.unlink(filePath);
+        }
+      } catch (unlinkErr) {
+        // ignore missing or unlink errors
+      }
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Gallery delete error:', err);
+    return res.status(500).json({ success: false, message: 'Unable to delete gallery image' });
   }
 });
 
@@ -659,12 +900,32 @@ app.get('/seed-users/status', async (req, res) => {
   }
 });
 
+async function loadFaceApiModels() {
+  if (!canvasAvailable) {
+    console.warn('⚠️  Skipping FaceAPI model loading - canvas/faceapi not available');
+    return;
+  }
+  
+  const modelPath = path.join(__dirname, 'node_modules', '@vladmandic', 'face-api', 'model');
+  await faceapi.tf.setBackend('tensorflow');
+  await faceapi.tf.ready();
+  await faceapi.nets.ssdMobilenetv1.loadFromDisk(modelPath);
+  await faceapi.nets.faceLandmark68Net.loadFromDisk(modelPath);
+  await faceapi.nets.faceRecognitionNet.loadFromDisk(modelPath);
+  console.log('FaceAPI models loaded from', modelPath);
+}
+
 async function start() {
   await ensureStorage();
+  await loadFaceApiModels();
   
   // Initialize seeded user scheduler on startup
   const users = await loadUsers();
   scheduler.setIoInstance(io);
+  scheduler.setResponseHandlers({
+    autoLike: persistSeedAutoLike,
+    sendMessage: persistSeedAutoMessage,
+  });
   scheduler.initializeAllSeededUsers(users);
   console.log('Seeded user scheduler initialized');
 

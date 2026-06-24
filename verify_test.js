@@ -1,0 +1,1 @@
+const fetch=require(" node-fetch\); (async()=>{ try { const res=await fetch(\http://localhost:3001/health\); const text=await res.text(); console.log(\health status\, res.status, text); } catch(err){ console.error(err);} })();

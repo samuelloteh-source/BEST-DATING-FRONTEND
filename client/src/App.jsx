@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react'
 import axios from './api'
 import Discovery from './Discovery'
 import Matches from './Matches'
+import MessagesList from './MessagesList'
 import Messaging from './Messaging'
 import Profile from './Profile'
+import FaceCapture from './FaceCapture'
 import Likes from './Likes'
 
 const interestOptions = [
@@ -12,11 +14,35 @@ const interestOptions = [
 ]
 
 function App() {
-  const [view, setView] = useState('login')
-  const [currentPage, setCurrentPage] = useState('discover')
+  const [view, setView] = useState(() => {
+    const path = window.location.pathname.replace(/\/$/, '')
+    if (path === '/signup') return 'signup'
+    if (path === '/login') return 'login'
+    if (path.startsWith('/app')) return 'app'
+    return 'loading'
+  })
+  const [currentPage, setCurrentPage] = useState(() => {
+    const path = window.location.pathname.replace(/\/$/, '')
+    if (path.startsWith('/app')) {
+      const page = path.slice(4) || '/discover'
+      if (page === '/matches') return 'matches'
+      if (page === '/messages') return 'messages'
+      if (page === '/likes') return 'likes'
+      if (page === '/profile') return 'profile'
+      return 'discover'
+    }
+    return 'discover'
+  })
   const [user, setUser] = useState(null)
-  const [authToken, setAuthToken] = useState(localStorage.getItem('authToken'))
+  const [authToken, setAuthToken] = useState(() => {
+    const token = localStorage.getItem('authToken')
+    if (token) {
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
+    }
+    return token
+  })
   const [selectedMatch, setSelectedMatch] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
   const [notifications, setNotifications] = useState([])
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [discoverFilters, setDiscoverFilters] = useState(() => {
@@ -33,16 +59,38 @@ function App() {
   const [loginPassword, setLoginPassword] = useState('')
   const [signup, setSignup] = useState({
     firstName: '', lastName: '', email: '', password: '', dob: '', country: '', stateRegion: '',
-    interests: [], bio: '', profileFile: null
+    interests: [], bio: '', profileFiles: [], selfieFile: null
   })
 
   useEffect(() => {
-    const path = window.location.pathname
+    const path = window.location.pathname.replace(/\/$/, '')
     if (path === '/signup') {
       setView('signup')
     } else if (path === '/login') {
       setView('login')
     }
+
+    const handlePopState = () => {
+      const currentPath = window.location.pathname.replace(/\/$/, '')
+      if (currentPath === '/signup') {
+        setView('signup')
+      } else if (currentPath === '/login') {
+        setView('login')
+      } else if (currentPath.startsWith('/app')) {
+        setView('app')
+        const page = currentPath.slice(4) || '/discover'
+        if (page === '/matches') return setCurrentPage('matches')
+        if (page === '/messages') return setCurrentPage('messages')
+        if (page === '/likes') return setCurrentPage('likes')
+        if (page === '/profile') return setCurrentPage('profile')
+        setCurrentPage('discover')
+      } else {
+        setView('login')
+      }
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
   }, [])
 
   useEffect(() => {
@@ -51,6 +99,8 @@ function App() {
       fetchNotifications()
     } else {
       delete axios.defaults.headers.common['Authorization']
+      setAuthLoading(false)
+      return
     }
     fetchCurrentUser()
   }, [authToken])
@@ -79,6 +129,9 @@ function App() {
     } catch (err) {
       localStorage.removeItem('authToken')
       setAuthToken(null)
+      setView('login')
+    } finally {
+      setAuthLoading(false)
     }
   }
 
@@ -141,13 +194,69 @@ function App() {
 
   const handleSignupChange = (field, value) => setSignup(prev => ({ ...prev, [field]: value }))
   const toggleInterest = (interest) => setSignup(prev => ({ ...prev, interests: prev.interests.includes(interest) ? prev.interests.filter(i=>i!==interest) : [...prev.interests, interest] }))
-  const handleFileChange = (e) => handleSignupChange('profileFile', e.target.files?.[0] || null)
-  const goNext = () => setStep(s=>Math.min(s+1,3))
-  const goBack = () => setStep(s=>Math.max(s-1,1))
+  const resetFaceVerification = () => {
+    setFaceVerified(false)
+    setFaceVerificationSkipped(false)
+    setFaceVerifyResult(null)
+  }
+  const handleFileChange = (e) => {
+    resetFaceVerification()
+    handleSignupChange('profileFiles', Array.from(e.target.files || []))
+  }
+  const handleSelfieChange = (e) => {
+    resetFaceVerification()
+    handleSignupChange('selfieFile', e.target.files?.[0] || null)
+  }
+  const handleSelfieBlob = (file) => {
+    resetFaceVerification()
+    handleSignupChange('selfieFile', file)
+  }
+  const [faceVerifying, setFaceVerifying] = useState(false)
+  const [faceVerifyResult, setFaceVerifyResult] = useState(null)
+  const [faceVerified, setFaceVerified] = useState(false)
+  const [faceVerificationSkipped, setFaceVerificationSkipped] = useState(false)
 
-  const handleSignupSubmit = async (e) => {
-    e.preventDefault()
-    if (step < 3) { goNext(); return }
+  const verifyFace = async () => {
+    setFaceVerifying(true)
+    setFaceVerifyResult(null)
+    try {
+      const profileFile = signup.profileFiles?.[0]
+      const selfie = signup.selfieFile
+      if (!profileFile || !selfie) {
+        setFaceVerifyResult({ success: false, message: 'Profile photo and selfie are required for verification.' })
+        setFaceVerifying(false)
+        return
+      }
+      const fd = new FormData()
+      fd.append('profile', profileFile)
+      fd.append('selfie', selfie)
+      const res = await axios.post('/verify/face', fd)
+      const result = res.data || { success: false, message: 'No response' }
+      setFaceVerifyResult(result)
+      const passed = Boolean(result.success && result.match)
+      setFaceVerified(passed)
+      setFaceVerificationSkipped(false)
+    } catch (err) {
+      setFaceVerifyResult({ success: false, message: err.response?.data?.message || err.message })
+      setFaceVerified(false)
+      setFaceVerificationSkipped(false)
+    } finally {
+      setFaceVerifying(false)
+    }
+  }
+  const goNext = () => setStep(s => Math.min(s + 1, 4))
+  const goBack = () => setStep(s=>Math.max(s-1,1))
+  const navigateAppPage = (page) => {
+    setCurrentPage(page)
+    window.history.pushState({}, '', `/app/${page}`)
+  }
+
+  const submitSignup = async () => {
+    if (signup.profileFiles?.[0] && signup.selfieFile && !faceVerified && !faceVerificationSkipped) {
+      setMessage('Please verify your face or skip verification before finishing signup.')
+      return
+    }
+
     try {
       const formData = new FormData()
       formData.append('name', `${signup.firstName} ${signup.lastName}`)
@@ -158,20 +267,39 @@ function App() {
       formData.append('state', signup.stateRegion)
       formData.append('interests', signup.interests.join(', '))
       formData.append('bio', signup.bio)
-      if (signup.profileFile) formData.append('photo', signup.profileFile)
+      signup.profileFiles?.forEach((file) => formData.append('photos', file))
+      if (signup.selfieFile) formData.append('photos', signup.selfieFile)
 
       const res = await axios.post('/signup', formData)
       if (res.data?.success) {
         setMessage('Signup complete! Please log in.')
         setView('login')
         setStep(1)
-        setSignup({ firstName:'', lastName:'', email:'', password:'', dob:'', country:'', stateRegion:'', interests:[], bio:'', profileFile:null })
+        setSignup({ firstName:'', lastName:'', email:'', password:'', dob:'', country:'', stateRegion:'', interests:[], bio:'', profileFiles: [], selfieFile: null })
       } else {
         setMessage('Signup failed: ' + (res.data?.message || 'Please try again.'))
       }
     } catch (err) {
       setMessage('Error: ' + (err.response?.data?.message || err.message))
     }
+  }
+
+  const handleSkipVerification = async () => {
+    setFaceVerificationSkipped(true)
+    await submitSignup()
+  }
+
+  const handleNext = async () => {
+    if (step < 4) {
+      goNext()
+      return
+    }
+    await submitSignup()
+  }
+
+  const handleSignupSubmit = async (e) => {
+    e.preventDefault()
+    await handleNext()
   }
 
   const loginView = (
@@ -200,8 +328,8 @@ function App() {
     <div className="page-shell">
       <div className="page-card">
         <h1 className="page-title">Signup</h1>
-        <p className="page-subtitle">Finish your profile in three quick steps.</p>
-        <div className="step-indicator">Step {step} of 3</div>
+        <p className="page-subtitle">Finish your profile in four quick steps.</p>
+        <div className="step-indicator">Step {step} of 4</div>
         <form className="form-card" onSubmit={handleSignupSubmit}>
           {step === 1 && (
             <>
@@ -222,10 +350,58 @@ function App() {
           {step === 3 && (
             <>
               <div className="form-field"><label>Bio</label><textarea value={signup.bio} onChange={e=>handleSignupChange('bio', e.target.value)} placeholder="Share something interesting about yourself" rows={5} required/></div>
-              <div className="form-field"><label>Upload profile photo</label><input type="file" accept="image/*" onChange={handleFileChange}/>{signup.profileFile && <p className="file-note">Selected file: {signup.profileFile.name}</p>}</div>
+              <div className="form-field">
+                <label>Upload profile photos</label>
+                <input type="file" accept="image/*" multiple onChange={handleFileChange}/>
+                {signup.profileFiles && signup.profileFiles.length > 0 && <p className="file-note">Selected {signup.profileFiles.length} photo(s)</p>}
+              </div>
             </>
           )}
-          <div className="button-row">{step>1 && <button type="button" className="secondary-button" onClick={goBack}>Back</button>}<button type="submit" className="primary-button">{step<3?'Next':'Finish signup'}</button></div>
+          {step === 4 && (
+            <>
+              <div className="form-field">
+                <label>Face verification (optional)</label>
+                <p className="hint">Please upload a selfie or capture one to verify your face matches your profile photo. You can skip this step.</p>
+                <div className="form-field">
+                  <label>Upload a selfie</label>
+                  <input type="file" accept="image/*" onChange={handleSelfieChange} />
+                  {signup.selfieFile && <p className="file-note">Selected selfie: {signup.selfieFile.name}</p>}
+                </div>
+
+                <div className="mt-3">
+                  <FaceCapture onCapture={handleSelfieBlob} />
+                </div>
+
+                {signup.profileFiles && signup.profileFiles.length > 0 && (
+                  <div className="preview" style={{marginTop:12}}>
+                    <p className="hint">Profile photo to verify against:</p>
+                    <img src={signup.profileFiles[0] ? URL.createObjectURL(signup.profileFiles[0]) : ''} alt="Profile preview" style={{maxWidth:200,borderRadius:12}} />
+                  </div>
+                )}
+
+                <div className="mt-3">
+                  <button type="button" className="secondary-button" onClick={verifyFace} disabled={faceVerifying}>{faceVerifying ? 'Verifying…' : 'Verify face'}</button>
+                  <button type="button" className="secondary-button" onClick={handleSkipVerification} disabled={faceVerifying} style={{marginLeft:8}}>Skip verification</button>
+                </div>
+
+                {faceVerifyResult && (
+                  <div style={{marginTop:10}}>
+                    {faceVerifyResult.success ? (
+                      <p style={{color: faceVerifyResult.match ? 'green' : 'orange'}}>{faceVerifyResult.match ? 'Face verification passed' : `Face mismatch (score ${faceVerifyResult.score?.toFixed ? faceVerifyResult.score.toFixed(3) : faceVerifyResult.score})`}</p>
+                    ) : (
+                      <p style={{color:'red'}}>Verification error: {faceVerifyResult.message}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+          <div className="button-row">
+            {step > 1 && <button type="button" className="secondary-button" onClick={goBack}>Back</button>}
+            <button type="button" className="primary-button" onClick={handleNext} disabled={step === 4 && signup.profileFiles?.[0] && signup.selfieFile && !faceVerified && !faceVerificationSkipped}>
+              {step < 4 ? 'Next' : 'Finish signup'}
+            </button>
+          </div>
         </form>
         <p className="page-note">Already have an account? <button type="button" className="button-link" onClick={() => { setView('login'); setMessage(''); window.history.pushState({}, '', '/') }}>Login</button></p>
         {message && <p className="form-message">{message}</p>}
@@ -233,21 +409,36 @@ function App() {
     </div>
   )
 
-  if (view === 'app' && user) {
+  return view === 'signup' ? signupView : authLoading ? (
+    <div className="page-shell">
+      <div className="page-card">
+        <p className="page-subtitle">Loading...</p>
+      </div>
+    </div>
+  ) : view === 'app' && user ? (() => {
     if (selectedMatch) return <Messaging user={user} match={selectedMatch} onBack={() => setSelectedMatch(null)} />
 
     const pageContent = currentPage === 'discover'
-      ? <Discovery user={user} onMatch={refreshNotifications} showHeader={false} filters={discoverFilters} />
+      ? <Discovery user={user} onMatch={refreshNotifications} showHeader={false} filters={discoverFilters} onDirectMessage={setSelectedMatch} />
       : currentPage === 'matches'
         ? <Matches user={user} onSelectMatch={setSelectedMatch} onLogout={handleLogout} />
         : currentPage === 'messages'
-          ? <Matches user={user} title="Messages" emptyText="No conversations yet. Keep matching!" onSelectMatch={setSelectedMatch} onLogout={handleLogout} />
+          ? <MessagesList user={user} onSelectMatch={setSelectedMatch} onLogout={handleLogout} />
           : currentPage === 'likes'
             ? <Likes />
             : <Profile user={user} onUpdateUser={setUser} onLogout={handleLogout} discoverFilters={discoverFilters} onUpdateDiscoverFilters={setDiscoverFilters} />
 
     return (
-      <div className="app-shell">
+      <div className={`app-shell ${currentPage === 'discover' ? 'discover-shell' : ''}`}>
+      <div className="top-right-profile">
+        <button
+          className={`profile-btn ${currentPage === 'profile' ? 'active' : ''}`}
+          onClick={() => navigateAppPage('profile')}
+          title="Profile"
+        >
+          {user && user.avatar ? <img src={user.avatar} alt={user.name || 'Profile'} /> : 'Profile'}
+        </button>
+      </div>
         {currentPage === 'discover' && (
           <div className="app-bar">
             <div>
@@ -285,17 +476,14 @@ function App() {
           {pageContent}
         </div>
         <div className="app-navigation">
-          <button className={`nav-btn ${currentPage === 'discover' ? 'active' : ''}`} onClick={() => setCurrentPage('discover')}>Discover</button>
-          <button className={`nav-btn ${currentPage === 'matches' ? 'active' : ''}`} onClick={() => setCurrentPage('matches')}>Matches</button>
-          <button className={`nav-btn ${currentPage === 'messages' ? 'active' : ''}`} onClick={() => setCurrentPage('messages')}>Messages</button>
-          <button className={`nav-btn ${currentPage === 'likes' ? 'active' : ''}`} onClick={() => setCurrentPage('likes')}>Likes</button>
-          <button className={`nav-btn ${currentPage === 'profile' ? 'active' : ''}`} onClick={() => setCurrentPage('profile')}>Profile</button>
+          <button className={`nav-btn ${currentPage === 'discover' ? 'active' : ''}`} onClick={() => navigateAppPage('discover')}>Discover</button>
+          <button className={`nav-btn ${currentPage === 'matches' ? 'active' : ''}`} onClick={() => navigateAppPage('matches')}>Matches</button>
+          <button className={`nav-btn ${currentPage === 'messages' ? 'active' : ''}`} onClick={() => navigateAppPage('messages')}>Messages</button>
+          <button className={`nav-btn ${currentPage === 'likes' ? 'active' : ''}`} onClick={() => navigateAppPage('likes')}>Likes</button>
         </div>
       </div>
     )
-  }
-
-  return view === 'signup' ? signupView : loginView
+  })() : view === 'login' ? loginView : signupView
 }
 
 export default App

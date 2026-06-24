@@ -202,7 +202,16 @@ function parseRow(row) {
 
 async function loadUsersFromDb() {
   const rows = await client.query('SELECT data FROM users ORDER BY created_at ASC');
-  return rows.map(parseRow).filter(Boolean);
+  const users = rows.map(parseRow).filter(Boolean);
+  // Some older JSON files use `passwordHash` instead of `password`.
+  // Normalize so callers can always use `user.password` for bcrypt checks.
+  return users.map(u => {
+    if (!u) return u;
+    if (!u.password && u.passwordHash) {
+      u.password = u.passwordHash;
+    }
+    return u;
+  });
 }
 
 async function loadPendingSignupsFromDb() {

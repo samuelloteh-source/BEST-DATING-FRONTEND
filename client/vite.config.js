@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import react, { reactCompilerPreset } from '@vitejs/plugin-react'
 import babel from '@rolldown/plugin-babel'
 
+const BACKEND_TARGET = 'http://localhost:3001'
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
@@ -9,49 +11,26 @@ export default defineConfig({
     babel({ presets: [reactCompilerPreset()] })
   ],
   server: {
-    host: '172.20.10.7',
+    host: '0.0.0.0',
     port: 5173,
     proxy: {
-      '/resend-verification': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-      },
-      '/verify-email': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-      },
-      '/discover': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-      },
-      '/matches': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-      },
-      '/likes': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-      },
-      '/messages': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-      },
-      '/notifications': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-      },
-      '/me': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-      },
-      '/logout': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-      },
-      '/api/user': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-      },
+      '/resend-verification': { target: BACKEND_TARGET, changeOrigin: true },
+      '/verify-email': { target: BACKEND_TARGET, changeOrigin: true },
+      '/verify/face': { target: BACKEND_TARGET, changeOrigin: true },
+      '/discover': { target: BACKEND_TARGET, changeOrigin: true },
+      '/matches': { target: BACKEND_TARGET, changeOrigin: true },
+      '/likes': { target: BACKEND_TARGET, changeOrigin: true },
+      '/messages': { target: BACKEND_TARGET, changeOrigin: true },
+      '/notifications': { target: BACKEND_TARGET, changeOrigin: true },
+      '/me': { target: BACKEND_TARGET, changeOrigin: true },
+      '/logout': { target: BACKEND_TARGET, changeOrigin: true },
+      '/api/user': { target: BACKEND_TARGET, changeOrigin: true },
+      '/login': { target: BACKEND_TARGET, changeOrigin: true },
+      '/signup': { target: BACKEND_TARGET, changeOrigin: true },
+      '/discover/like': { target: BACKEND_TARGET, changeOrigin: true },
+      '/discover/pass': { target: BACKEND_TARGET, changeOrigin: true },
+      '/discover/superlike': { target: BACKEND_TARGET, changeOrigin: true },
+      '/profile/gallery': { target: BACKEND_TARGET, changeOrigin: true },
     },
   },
 })

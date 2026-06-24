@@ -11,7 +11,7 @@ const DEFAULT_FILTERS = {
   interests: []
 };
 
-export default function Discovery({ user, onMatch, showHeader = true, filters }) {
+export default function Discovery({ user, onMatch, showHeader = true, filters, onDirectMessage }) {
   const [users, setUsers] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -156,6 +156,18 @@ export default function Discovery({ user, onMatch, showHeader = true, filters })
 
   const currentUser = filteredUsers[currentIndex];
 
+  const resolveImageUrl = (url) => {
+    if (!url) return null;
+    if (typeof url === 'string' && url.startsWith('/uploads/')) {
+      return `${apiBaseUrl}${url}`;
+    }
+    return url;
+  };
+
+  const currentUserImage = resolveImageUrl(
+    (currentUser?.gallery && currentUser.gallery.length > 0 && currentUser.gallery[0].url)
+    || currentUser?.photo
+  ) || 'https://via.placeholder.com/300x400?text=No+Photo';
 
   const resetDrag = () => setDragState({ active: false, startX: 0, startY: 0, offsetX: 0, offsetY: 0, isSwiping: false });
 
@@ -275,7 +287,7 @@ export default function Discovery({ user, onMatch, showHeader = true, filters })
         >
           <div className="card-image">
             <img 
-              src={currentUser.photo || 'https://via.placeholder.com/300x400?text=No+Photo'} 
+              src={currentUserImage}
               alt={currentUser.name}
             />
             <div className="card-overlay">
@@ -285,6 +297,11 @@ export default function Discovery({ user, onMatch, showHeader = true, filters })
                 <div className="online-badge">
                   <div className={`online-dot ${userOnlineStatus[currentUser.id] ? 'online' : 'offline'}`}></div>
                   <span>{userOnlineStatus[currentUser.id] ? 'Online' : 'Offline'}</span>
+                </div>
+              )}
+              {currentUser.gallery && currentUser.gallery.length > 1 && (
+                <div className="photo-count-badge">
+                  <span>{currentUser.gallery.length} photos</span>
                 </div>
               )}
             </div>
@@ -324,8 +341,15 @@ export default function Discovery({ user, onMatch, showHeader = true, filters })
           <div className="profile-modal" onClick={(event) => event.stopPropagation()}>
             <button type="button" className="modal-close-btn" onClick={closeProfileDetails}>×</button>
             <div className="profile-modal-image">
-              <img src={selectedProfile.photo || 'https://via.placeholder.com/500x500?text=No+Photo'} alt={selectedProfile.name} />
+              <img src={resolveImageUrl((selectedProfile.gallery && selectedProfile.gallery.length > 0 && selectedProfile.gallery[0].url) || selectedProfile.photo) || 'https://via.placeholder.com/500x500?text=No+Photo'} alt={selectedProfile.name} />
             </div>
+            {selectedProfile.gallery && selectedProfile.gallery.length > 1 && (
+              <div className="gallery-thumbnails">
+                {selectedProfile.gallery.slice(0, 4).map((image) => (
+                  <img key={image.id} src={resolveImageUrl(image.url)} alt="Gallery thumbnail" className="gallery-thumbnail" />
+                ))}
+              </div>
+            )}
             <div className="profile-modal-content">
               <h2>{selectedProfile.name}</h2>
               <p className="modal-location">{selectedProfile.state || selectedProfile.city || 'Unknown location'}, {selectedProfile.country || 'Unknown country'}</p>
@@ -342,6 +366,18 @@ export default function Discovery({ user, onMatch, showHeader = true, filters })
                   </div>
                 </>
               )}
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="message-btn"
+                  onClick={() => {
+                    closeProfileDetails();
+                    if (typeof onDirectMessage === 'function') onDirectMessage(selectedProfile);
+                  }}
+                >
+                  Message
+                </button>
+              </div>
             </div>
           </div>
         </div>

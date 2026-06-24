@@ -1,9 +1,11 @@
 .likes-container {
-  min-height: calc(100vh - 160px);
+  min-height: 100vh;
   padding: 20px;
   max-width: 1126px;
   margin: 0 auto;
-  color: #fff;
+  color: #f5f5f5;
+  background-color: var(--likes-bg, #1a1a1a);
+  transition: background-color 250ms ease, color 250ms ease;
 }
 
 .likes-header {
@@ -35,10 +37,10 @@
   margin-top: 20px;
   padding: 30px;
   border-radius: 28px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   text-align: center;
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .likes-grid {
@@ -111,7 +113,7 @@
 @media (max-width: 720px) {
   .likes-container {
     padding: 16px;
-    min-height: calc(100vh - 140px);
+    min-height: 100vh;
   }
 
   .likes-header h1 {
