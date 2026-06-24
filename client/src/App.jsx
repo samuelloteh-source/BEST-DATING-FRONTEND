@@ -19,6 +19,7 @@ function App() {
     if (path === '/signup') return 'signup'
     if (path === '/login') return 'login'
     if (path.startsWith('/app')) return 'app'
+    if (path === '/admin') return 'admin'
     return 'loading'
   })
   const [currentPage, setCurrentPage] = useState(() => {

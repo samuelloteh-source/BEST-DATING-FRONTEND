@@ -27,6 +27,9 @@ try {
 const scheduler = require('./seeded-user-scheduler');
 
 const app = express();
+const cors = require('cors'); 
+app.use(cors());
+app.use(express.json()); // 
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
