@@ -39,3 +39,10 @@ server/messages.json
 # Misc
 .cache/
 .parcel-cache/
+
+server/database.sqlite
+*.db
+uploads/
+*.mp4
+*.jpg
+*.png
