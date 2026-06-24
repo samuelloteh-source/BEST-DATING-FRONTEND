@@ -25,3 +25,11 @@ dist-ssr
 # Environment variables
 .env
 .env.local
+
+node_modules
+build
+coverage
+uploads/
+*.mp4
+*.jpg
+*.png
