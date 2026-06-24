@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import axios from './api'
+import axios, { resolveImageUrl } from './api'
+import './App.css'
 import Discovery from './Discovery'
 import Matches from './Matches'
 import MessagesList from './MessagesList'
@@ -437,7 +438,7 @@ function App() {
           onClick={() => navigateAppPage('profile')}
           title="Profile"
         >
-          {user && user.avatar ? <img src={user.avatar} alt={user.name || 'Profile'} /> : 'Profile'}
+          {user && user.avatar ? <img src={resolveImageUrl(user.avatar)} alt={user.name || 'Profile'} /> : 'Profile'}
         </button>
       </div>
         {currentPage === 'discover' && (

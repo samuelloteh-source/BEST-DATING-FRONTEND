@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import axios from './api'
+import axios, { resolveImageUrl } from './api'
 import './MessagesList.css'
 
 export default function MessagesList({ user, onSelectMatch, onLogout }) {
@@ -54,7 +54,7 @@ export default function MessagesList({ user, onSelectMatch, onLogout }) {
               onClick={() => onSelectMatch(thread)}
             >
               <div className="conversation-avatar">
-                <img src={thread.photo || 'https://via.placeholder.com/80?text=No+Photo'} alt={thread.name} />
+                <img src={resolveImageUrl(thread.photo) || 'https://via.placeholder.com/80?text=No+Photo'} alt={thread.name} />
               </div>
               <div className="conversation-details">
                 <div className="conversation-top">

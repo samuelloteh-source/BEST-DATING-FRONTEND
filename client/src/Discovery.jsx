@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import axios, { apiBaseUrl } from './api';
+import axios, { apiBaseUrl, resolveImageUrl } from './api';
 import io from 'socket.io-client';
 import './Discovery.css';
 
@@ -155,14 +155,6 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
   }, [filteredUsers, currentIndex]);
 
   const currentUser = filteredUsers[currentIndex];
-
-  const resolveImageUrl = (url) => {
-    if (!url) return null;
-    if (typeof url === 'string' && url.startsWith('/uploads/')) {
-      return `${apiBaseUrl}${url}`;
-    }
-    return url;
-  };
 
   const currentUserImage = resolveImageUrl(
     (currentUser?.gallery && currentUser.gallery.length > 0 && currentUser.gallery[0].url)

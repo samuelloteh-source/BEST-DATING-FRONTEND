@@ -11,7 +11,7 @@ const fs = require('fs');
 const dns = require('dns').promises;
 const db = require('./db');
 
-dotenv.config();
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 // Multer with file size limits and image type filter
 const upload = multer({ 

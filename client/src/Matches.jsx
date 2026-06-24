@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import axios, { apiBaseUrl } from './api';
+import axios, { apiBaseUrl, resolveImageUrl } from './api';
 import io from 'socket.io-client';
 import './Matches.css';
 
@@ -76,7 +76,7 @@ export default function Matches({ user, title = 'Matches', emptyText = 'No match
             >
               <div className="match-image">
                 <img 
-                  src={match.photo || 'https://via.placeholder.com/150?text=No+Photo'} 
+                  src={resolveImageUrl(match.photo) || 'https://via.placeholder.com/150?text=No+Photo'} 
                   alt={match.name}
                 />
                 <div className="match-overlay">

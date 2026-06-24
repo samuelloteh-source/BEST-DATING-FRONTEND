@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import axios from './api'
+import axios, { apiBaseUrl } from './api'
 
 const interestOptions = [
   'Travel', 'Cooking', 'Music', 'Fitness', 'Movies', 'Reading', 'Art & Culture',
@@ -24,6 +24,14 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
   const [gallery, setGallery] = useState([])
   const [galleryUploading, setGalleryUploading] = useState(false)
   const [galleryMessage, setGalleryMessage] = useState('')
+
+  const resolveImageUrl = (url) => {
+    if (!url) return ''
+    if (typeof url === 'string' && url.startsWith('/uploads/')) {
+      return `${apiBaseUrl}${url}`
+    }
+    return url
+  }
 
   useEffect(() => {
     if (!user) return
@@ -354,7 +362,7 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
                       ) : (
                         gallery.map((image) => (
                           <div key={image.id} className="relative overflow-hidden rounded-3xl border border-white/10 bg-slate-950">
-                            <img src={image.url} alt="Gallery" className="h-28 w-full object-cover" />
+                            <img src={resolveImageUrl(image.url)} alt="Gallery" className="h-28 w-full object-cover" />
                             <button
                               type="button"
                               onClick={() => handleDeleteGalleryImage(image.id)}

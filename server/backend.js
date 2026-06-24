@@ -238,7 +238,16 @@ app.use('/uploads', express.static(UPLOADS_DIR));
 app.get('/me', authMiddleware, async (req, res) => {
   return res.json({ success: true, user: cleanUserForClient(req.user) });
 });
-
+// Admin: get all users
+app.get('/api/admin/users', (req, res) => {
+  db.all('SELECT id, name, email, role, created_at FROM users', [], (err, rows) => {
+    if (err) {
+      console.error(err.message);
+      return res.status(500).json({ error: err.message });
+    }
+    res.json(rows);
+  });
+});
 app.post('/signup', upload.array('photos', 10), async (req, res) => {
   try {
     const { name, dob, email, password, country, state, bio, interests } = req.body;

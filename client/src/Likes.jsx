@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import axios from './api'
+import axios, { resolveImageUrl } from './api'
 import './Likes.css'
 
 export default function Likes() {
@@ -50,7 +50,7 @@ export default function Likes() {
           {likes.map((item) => (
             <div key={item.id} className="like-card">
               <div className="like-card-image">
-                <img src={item.photo || 'https://via.placeholder.com/400x300?text=No+Photo'} alt={item.name} />
+                <img src={resolveImageUrl(item.photo) || 'https://via.placeholder.com/400x300?text=No+Photo'} alt={item.name} />
               </div>
               <div className="like-card-body">
                 <div className="like-card-title">{item.name}</div>

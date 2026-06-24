@@ -190,30 +190,43 @@
 
 .top-right-profile {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 16px;
+  right: 16px;
   z-index: 60;
 }
 
 .profile-btn {
-  background: rgba(0,0,0,0.45);
-  border: 1px solid rgba(255,255,255,0.06);
-  color: #fff;
-  padding: 6px 10px;
-  border-radius: 12px;
+  background: rgba(255,255,255,0.92);
+  border: 1px solid rgba(15,23,42,0.1);
+  color: #111827;
+  padding: 4px;
+  border-radius: 9999px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 0;
+  min-width: 40px;
+  width: 40px;
+  max-width: 40px;
+  min-height: 40px;
+  height: 40px;
+  overflow: hidden;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.profile-btn:hover {
+  transform: translateY(-1px);
+  background-color: rgba(255,255,255,1);
 }
 
 .profile-btn img {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   object-fit: cover;
 }
 
 .profile-btn.active {
-  box-shadow: 0 6px 18px rgba(255,0,109,0.18);
+  box-shadow: 0 0 0 2px rgba(255,0,109,0.18);
 }
