@@ -157,6 +157,8 @@ async function sendPasswordResetEmail(user, token) {
 
 // Middleware - must be before routes
 app.use(express.json());
+// Parse URL-encoded bodies (for admin login form POST)
+app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, '../client')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
@@ -1098,11 +1100,8 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (() => {
 })();
 
 app.get('/admin', async (req, res) => {
-  const password = req.query.pwd;
-  
-  // If no password or wrong password, show login form
-  if (password !== ADMIN_PASSWORD) {
-    return res.send(`
+  // Always show login form; POST will validate the password
+  return res.send(`
     <!DOCTYPE html>
     <html>
     <head>
@@ -1119,7 +1118,7 @@ app.get('/admin', async (req, res) => {
     <body>
       <div class="box">
         <h1>⚡ SPARK Admin</h1>
-        <form>
+        <form method="POST" action="/admin">
           <input type="password" name="pwd" placeholder="Enter admin password" required>
           <br>
           <button type="submit">Login</button>
@@ -1128,8 +1127,42 @@ app.get('/admin', async (req, res) => {
     </body>
     </html>
     `);
+});
+
+// Handle admin login via POST to avoid exposing password in URL
+app.post('/admin', async (req, res) => {
+  const password = String(req.body?.pwd || '');
+  if (password !== ADMIN_PASSWORD) {
+    return res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>SPARK Admin Login</title>
+        <style>
+          body { background: #111; color: white; font-family: Arial; display: flex; justify-content: center; align-items: center; height: 100vh; }
+          .box { background: #222; padding: 40px; border-radius: 12px; border: 2px solid red; }
+          input { padding: 12px; width: 250px; border-radius: 8px; border: none; margin: 10px 0; }
+          button { padding: 12px 24px; background: red; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+          button:hover { background: #ff3333; }
+          h1 { color: red; margin-top: 0; }
+          .error { color: orange; margin-bottom: 8px; }
+        </style>
+      </head>
+      <body>
+        <div class="box">
+          <h1>⚡ SPARK Admin</h1>
+          <div class="error">Invalid password. Try again.</div>
+          <form method="POST" action="/admin">
+            <input type="password" name="pwd" placeholder="Enter admin password" required>
+            <br>
+            <button type="submit">Login</button>
+          </form>
+        </div>
+      </body>
+      </html>
+    `);
   }
-  
+
   // If password correct, show users table
   const users = await loadUsersFromFile();
   const safeUsers = users.map(({password, ...user}) => user);
@@ -1165,14 +1198,14 @@ app.get('/admin', async (req, res) => {
   html += `</table>
   <script>
     (function(){
-      const pwd = ${JSON.stringify(password)};
+      // After successful POST auth we keep password off the URL by reusing server-side checks
       document.querySelectorAll('.suspendBtn').forEach(b=>{
         b.addEventListener('click', async ()=>{
           const id = b.getAttribute('data-id');
           const suspend = b.textContent.trim() !== 'Unsuspend';
           b.disabled = true;
           try {
-            const res = await fetch('/admin/suspend', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ userId: id, suspend, pwd }) });
+            const res = await fetch('/admin/suspend', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ userId: id, suspend, pwd: '' }) });
             const j = await res.json();
             if (j.success) {
               b.textContent = suspend ? 'Unsuspend' : 'Suspend';
@@ -1189,7 +1222,7 @@ app.get('/admin', async (req, res) => {
           const id = b.getAttribute('data-id');
           b.disabled = true;
           try {
-            const res = await fetch('/admin/user/' + encodeURIComponent(id) + '?pwd=' + encodeURIComponent(pwd), { method: 'DELETE' });
+            const res = await fetch('/admin/user/' + encodeURIComponent(id), { method: 'DELETE' });
             const j = await res.json();
             if (j.success) {
               const row = document.getElementById('user-' + id);

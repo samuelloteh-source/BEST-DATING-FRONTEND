@@ -239,14 +239,23 @@ app.get('/me', authMiddleware, async (req, res) => {
   return res.json({ success: true, user: cleanUserForClient(req.user) });
 });
 // Admin: get all users
-app.get('/api/admin/users', (req, res) => {
-  db.all('SELECT id, name, email, role, created_at FROM users', [], (err, rows) => {
-    if (err) {
-      console.error(err.message);
-      return res.status(500).json({ error: err.message });
-    }
+app.get('/api/admin/users', async (req, res) => {
+  try {
+    const users = await loadUsers();
+    const rows = users.map((user) => ({
+      id: user.id,
+      name: user.name,
+      email: normalizeEmail(user.email),
+      role: user.role || 'user',
+      created_at: user.created_at || user.createdAt || null,
+      photo: user.photo || '',
+      avatar: user.avatar || user.photo || ''
+    }));
     res.json(rows);
-  });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Unable to load admin users' });
+  }
 });
 app.post('/signup', upload.array('photos', 10), async (req, res) => {
   try {

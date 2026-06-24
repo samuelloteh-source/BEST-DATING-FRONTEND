@@ -8,6 +8,7 @@ import Messaging from './Messaging'
 import Profile from './Profile'
 import FaceCapture from './FaceCapture'
 import Likes from './Likes'
+import Admin from './admin'
 
 const interestOptions = [
   'Travel', 'Cooking', 'Music', 'Fitness', 'Movies', 'Reading', 'Art & Culture',
@@ -410,6 +411,8 @@ function App() {
       </div>
     </div>
   )
+
+  if (view === 'admin') return <Admin />;
 
   return view === 'signup' ? signupView : authLoading ? (
     <div className="page-shell">
