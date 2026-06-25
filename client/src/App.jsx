@@ -443,30 +443,39 @@ function App() {
   }
 
   const submitSignup = async ({ skipVerification = false } = {}) => {
-    if (!isValidEmail(signup.email)) {
-      setMessage('Please enter a valid email address before finishing signup.')
-      return
+    const emailToCheck = (signup.email || '').trim()
+    console.log('submitSignup', { email: emailToCheck, signup, skipVerification })
+    setMessage('')
+    setSignupStepMessage('')
+
+    if (!isValidEmail(emailToCheck)) {
+      setStep(1)
+      setSignupStepMessage('Please enter a valid email address before finishing signup.')
+      if (skipVerification) {
+        window.alert('Please enter a valid email address before finishing signup.')
+      }
+      return false
     }
 
     if (!signup.profileFiles || signup.profileFiles.length === 0) {
       setMessage('Please upload at least one profile photo before finishing signup.')
-      return
+      return false
     }
 
     if (!signup.selfieFile && !skipVerification) {
       setMessage('Please upload or capture a selfie before finishing signup.')
-      return
+      return false
     }
 
     if (signup.profileFiles?.[0] && signup.selfieFile && !faceVerified && !skipVerification && !faceVerificationSkipped) {
       setMessage('Please verify your face or skip verification before finishing signup.')
-      return
+      return false
     }
 
     try {
       const formData = new FormData()
       formData.append('name', `${signup.firstName} ${signup.lastName}`)
-      formData.append('email', signup.email)
+      formData.append('email', emailToCheck)
       formData.append('password', signup.password)
       formData.append('dob', signup.dob)
       formData.append('country', signup.country)
@@ -483,11 +492,14 @@ function App() {
         localStorage.removeItem('signupStep')
         setStep(1)
         setSignup({ firstName:'', lastName:'', email:'', password:'', dob:'', country:'', stateRegion:'', interests:[], bio:'', profileFiles: [], selfieFile: null })
+        return true
       } else {
         setMessage('Signup failed: ' + (res.data?.message || 'Please try again.'))
+        return false
       }
     } catch (err) {
       setMessage('Error: ' + (err.response?.data?.message || err.message))
+      return false
     }
   }
 
@@ -534,12 +546,20 @@ function App() {
   }
 
   const handleSkipVerification = async () => {
+    setMessage('')
+    setSignupStepMessage('')
     if (!signup.profileFiles || signup.profileFiles.length === 0) {
       setMessage('Please upload at least one profile photo before skipping verification.')
       return
     }
+    console.log('handleSkipVerification', { signup })
     setFaceVerificationSkipped(true)
-    await submitSignup({ skipVerification: true })
+    const success = await submitSignup({ skipVerification: true })
+    if (!success && !isValidEmail((signup.email || '').trim())) {
+      setStep(1)
+      setSignupStepMessage('Please enter a valid email address before finishing signup.')
+      window.alert('Please enter a valid email address before finishing signup.')
+    }
   }
 
   const handleNext = async () => {
