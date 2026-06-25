@@ -178,15 +178,9 @@ export default function FaceCapture({ onCapture }) {
       streamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
-        try {
-          await videoRef.current.play()
-        } catch (err) {
-          // autoplay policies may prevent play(); we'll rely on events
-          console.warn('video.play() failed', err)
-        }
-
         // set up listeners to detect when video frames arrive
         const onPlaying = () => {
+          console.log('video playing event')
           setVideoReady(true)
           setMessage('')
           if (videoReadyTimeoutRef.current) { clearTimeout(videoReadyTimeoutRef.current); videoReadyTimeoutRef.current = null }
@@ -195,6 +189,7 @@ export default function FaceCapture({ onCapture }) {
           videoListenersRef.current = {}
         }
         const onLoaded = () => {
+          console.log('video loadedmetadata event', { width: videoRef.current?.videoWidth })
           if (videoRef.current && videoRef.current.videoWidth > 0) {
             setVideoReady(true)
             setMessage('')
@@ -203,14 +198,31 @@ export default function FaceCapture({ onCapture }) {
         }
         videoListenersRef.current.playing = onPlaying
         videoListenersRef.current.loaded = onLoaded
+        // attach listeners BEFORE assigning srcObject to avoid missing immediate events
         videoRef.current.addEventListener('playing', onPlaying)
         videoRef.current.addEventListener('loadedmetadata', onLoaded)
+
+        // assign stream after listeners are in place
+        try {
+          videoRef.current.srcObject = stream
+        } catch (err) {
+          // fallback assignment
+          console.warn('assign srcObject failed', err)
+          videoRef.current.src = URL.createObjectURL(stream)
+        }
+
+        try {
+          await videoRef.current.play()
+        } catch (err) {
+          // autoplay policies may prevent play(); events should still fire
+          console.warn('video.play() failed', err)
+        }
 
         // fallback timeout: if no frames after 5s, show guidance
         videoReadyTimeoutRef.current = setTimeout(() => {
           if (!videoRef.current) return
           if (videoRef.current.videoWidth === 0) {
-            setMessage('Camera started but no preview is available. Check browser camera permissions, close other apps using the camera, or try a different browser.')
+            setMessage('Camera started but no preview is available. Check browser camera permissions, close other apps using the camera, or try a different browser or disable WebRTC-blocking extensions.')
             setVideoReady(false)
           }
           videoReadyTimeoutRef.current = null
