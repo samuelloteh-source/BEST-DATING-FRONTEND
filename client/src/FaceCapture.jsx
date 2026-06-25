@@ -218,8 +218,23 @@ export default function FaceCapture({ onCapture }) {
     try {
       const video = videoRef.current
       const faceapi = faceapiRef.current
-      const detections = await faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors()
-      
+
+      // Wait briefly for the video element to have valid dimensions / data
+      let attempts = 0
+      while ((video.videoWidth === 0 || video.readyState < 2) && attempts < 10) {
+        // wait up to ~2s total
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise(r => setTimeout(r, 200))
+        attempts++
+      }
+
+      // Run detection with a timeout so the UI doesn't hang indefinitely
+      const detectPromise = faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors()
+      const detections = await Promise.race([
+        detectPromise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Face detection timed out')), 5000))
+      ])
+
       if (!detections || detections.length === 0) {
         setMessage('No face detected. Please try again.')
         return
