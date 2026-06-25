@@ -41,14 +41,22 @@ export default function FaceCapture({ onCapture }) {
         let loaded = false
         let lastErr = null
         for (const base of modelBaseUrls) {
-          try {
-            await m.loader(base)
-            loaded = true
-            break
-          } catch (e) {
-            console.warn(`Failed to load ${m.name} from ${base}`, e)
-            lastErr = e
+          // try multiple attempts per base URL with backoff
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+              console.log(`Loading model ${m.name} from ${base} (attempt ${attempt})`)
+              await m.loader(base)
+              loaded = true
+              break
+            } catch (e) {
+              console.warn(`Attempt ${attempt} failed to load ${m.name} from ${base}:`, e && e.message ? e.message : e)
+              lastErr = e
+              // exponential-ish backoff
+              // eslint-disable-next-line no-await-in-loop
+              await new Promise(r => setTimeout(r, 250 * attempt))
+            }
           }
+          if (loaded) break
         }
         if (!loaded) {
           throw new Error(`Failed to load model ${m.name}: ${lastErr && lastErr.message}`)
@@ -65,12 +73,16 @@ export default function FaceCapture({ onCapture }) {
 
       window.faceApiInitPromise = (async () => {
         try {
+          console.log('Initializing face-api...')
           const faceapi = window.faceapi
           if (!faceapi) {
             throw new Error('Face API script failed to load')
           }
+          console.log('faceapi global object is present')
           setLoadingFaceApi(true)
+          console.log('Beginning to load face-api models')
           await loadFaceApiModels(faceapi)
+          console.log('Model loading complete')
           if (!mounted) return
           faceapiRef.current = faceapi
           setFaceApiReady(true)
@@ -113,13 +125,20 @@ export default function FaceCapture({ onCapture }) {
       window.faceApiScriptLoadingPromise = (async () => {
         let lastError = null
         for (const url of faceApiScriptUrls) {
-          try {
-            await loadScriptFromUrl(url)
-            window.faceApiScriptLoaded = true
-            return await initFaceApi()
-          } catch (err) {
-            console.warn(err)
-            lastError = err
+          // try multiple attempts per script URL with backoff
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+              console.log(`Loading face-api script from ${url} (attempt ${attempt})`)
+              await loadScriptFromUrl(url)
+              window.faceApiScriptLoaded = true
+              console.log(`Loaded face-api script from ${url}`)
+              return await initFaceApi()
+            } catch (err) {
+              console.warn(`Failed to load face-api script from ${url} (attempt ${attempt}):`, err && err.message ? err.message : err)
+              lastError = err
+              // eslint-disable-next-line no-await-in-loop
+              await new Promise(r => setTimeout(r, 200 * attempt))
+            }
           }
         }
         window.faceApiScriptLoaded = false

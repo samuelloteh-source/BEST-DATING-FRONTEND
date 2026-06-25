@@ -442,7 +442,7 @@ function App() {
     window.history.pushState({}, '', `/app/${page}`)
   }
 
-  const submitSignup = async () => {
+  const submitSignup = async ({ skipVerification = false } = {}) => {
     if (!isValidEmail(signup.email)) {
       setMessage('Please enter a valid email address before finishing signup.')
       return
@@ -453,12 +453,12 @@ function App() {
       return
     }
 
-    if (!signup.selfieFile) {
+    if (!signup.selfieFile && !skipVerification) {
       setMessage('Please upload or capture a selfie before finishing signup.')
       return
     }
 
-    if (signup.profileFiles?.[0] && signup.selfieFile && !faceVerified && !faceVerificationSkipped) {
+    if (signup.profileFiles?.[0] && signup.selfieFile && !faceVerified && !skipVerification && !faceVerificationSkipped) {
       setMessage('Please verify your face or skip verification before finishing signup.')
       return
     }
@@ -524,7 +524,7 @@ function App() {
       }
     }
     if (step === 4) {
-      if (!signup.selfieFile) {
+      if (!signup.selfieFile && !faceVerificationSkipped) {
         setSignupStepMessage('Please upload or capture a selfie before finishing signup.')
         return false
       }
@@ -534,12 +534,12 @@ function App() {
   }
 
   const handleSkipVerification = async () => {
-    if (!signup.selfieFile) {
-      setMessage('Please upload or capture a selfie before skipping verification.')
+    if (!signup.profileFiles || signup.profileFiles.length === 0) {
+      setMessage('Please upload at least one profile photo before skipping verification.')
       return
     }
     setFaceVerificationSkipped(true)
-    await submitSignup()
+    await submitSignup({ skipVerification: true })
   }
 
   const handleNext = async () => {
@@ -664,7 +664,7 @@ function App() {
 
                 <div className="mt-3">
                   <button type="button" className="secondary-button" onClick={verifyFace} disabled={faceVerifying}>{faceVerifying ? 'Verifying…' : 'Verify face'}</button>
-                  <button type="button" className="secondary-button" onClick={handleSkipVerification} disabled={faceVerifying || !signup.selfieFile} style={{marginLeft:8}}>Skip verification</button>
+                  <button type="button" className="secondary-button" onClick={handleSkipVerification} disabled={faceVerifying} style={{marginLeft:8}}>Skip verification</button>
                 </div>
 
                 {faceVerifyResult && (
