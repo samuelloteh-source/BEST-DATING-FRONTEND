@@ -13,6 +13,7 @@ export default function FaceCapture({ onCapture }) {
   const [detecting, setDetecting] = useState(false)
   const [message, setMessage] = useState('')
   const [faceApiReady, setFaceApiReady] = useState(false)
+  const [loadingFaceApi, setLoadingFaceApi] = useState(false)
   const [previewUrl, setPreviewUrl] = useState('')
   const [capturedFile, setCapturedFile] = useState(null)
   const faceapiRef = useRef(null)
@@ -38,7 +39,6 @@ export default function FaceCapture({ onCapture }) {
         let lastErr = null
         for (const base of modelBaseUrls) {
           try {
-            setMessage(`Loading model ${m.name} from ${base}...`)
             await m.loader(base)
             loaded = true
             break
@@ -66,16 +66,20 @@ export default function FaceCapture({ onCapture }) {
           if (!faceapi) {
             throw new Error('Face API script failed to load')
           }
-          setMessage('Loading face detection models...')
+          setLoadingFaceApi(true)
           await loadFaceApiModels(faceapi)
           if (!mounted) return
           faceapiRef.current = faceapi
           setFaceApiReady(true)
+          setLoadingFaceApi(false)
           setMessage('')
           console.log('face-api loaded and models ready')
         } catch (err) {
           console.error('Face API initialization error', err)
-          if (mounted) setMessage('Face detection setup failed. Please refresh the page.')
+          if (mounted) {
+            setLoadingFaceApi(false)
+            setMessage('Face detection setup failed. Please refresh the page.')
+          }
           throw err
         }
       })()
@@ -150,6 +154,10 @@ export default function FaceCapture({ onCapture }) {
 
   const startCamera = async () => {
     try {
+      setMessage('')
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Camera API is not available in this browser.')
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ video: true })
       streamRef.current = stream
       if (videoRef.current) {
@@ -157,11 +165,12 @@ export default function FaceCapture({ onCapture }) {
         await videoRef.current.play()
       }
       setActive(true)
-      setMessage('')
     } catch (err) {
       console.error('Camera error', err)
       let message = 'Camera access denied. Please allow camera access in your browser and try again.'
-      if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+      if (err.message === 'Camera API is not available in this browser.') {
+        message = 'Camera API unavailable. Use a supported browser with camera access.'
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
         message = 'No camera found. Please connect a camera and try again.'
       } else if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         message = 'Camera permission denied. Allow camera access in your browser settings and retry.'

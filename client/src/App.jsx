@@ -434,6 +434,16 @@ function App() {
       return
     }
 
+    if (!signup.profileFiles || signup.profileFiles.length === 0) {
+      setMessage('Please upload at least one profile photo before finishing signup.')
+      return
+    }
+
+    if (!signup.selfieFile) {
+      setMessage('Please upload or capture a selfie before finishing signup.')
+      return
+    }
+
     if (signup.profileFiles?.[0] && signup.selfieFile && !faceVerified && !faceVerificationSkipped) {
       setMessage('Please verify your face or skip verification before finishing signup.')
       return
@@ -467,23 +477,59 @@ function App() {
     }
   }
 
+  const validateSignupStep = () => {
+    setSignupStepMessage('')
+    if (step === 1) {
+      if (!isValidEmail(signup.email)) {
+        setSignupStepMessage('Please enter a valid email address before continuing.')
+        return false
+      }
+      if (!passwordStrong) {
+        setSignupStepMessage('Password must be strong enough before continuing. Please meet all criteria.')
+        return false
+      }
+    }
+    if (step === 2) {
+      if (!signup.dob || !signup.country.trim() || !signup.stateRegion.trim()) {
+        setSignupStepMessage('Please complete all personal details before continuing.')
+        return false
+      }
+      if (!signup.interests || signup.interests.length === 0) {
+        setSignupStepMessage('Please select at least one interest before continuing.')
+        return false
+      }
+    }
+    if (step === 3) {
+      if (!signup.bio.trim()) {
+        setSignupStepMessage('Please enter a bio before continuing.')
+        return false
+      }
+      if (!signup.profileFiles || signup.profileFiles.length === 0) {
+        setSignupStepMessage('Please upload at least one profile photo before continuing.')
+        return false
+      }
+    }
+    if (step === 4) {
+      if (!signup.selfieFile) {
+        setSignupStepMessage('Please upload or capture a selfie before finishing signup.')
+        return false
+      }
+    }
+    setSignupStepMessage('')
+    return true
+  }
+
   const handleSkipVerification = async () => {
+    if (!signup.selfieFile) {
+      setMessage('Please upload or capture a selfie before skipping verification.')
+      return
+    }
     setFaceVerificationSkipped(true)
     await submitSignup()
   }
 
   const handleNext = async () => {
-    if (step === 1) {
-      if (!isValidEmail(signup.email)) {
-        setSignupStepMessage('Please enter a valid email address before continuing.')
-        return
-      }
-      if (!passwordStrong) {
-        setSignupStepMessage('Password must be strong enough before continuing. Please meet all criteria.')
-        return
-      }
-      setSignupStepMessage('')
-    }
+    if (!validateSignupStep()) return
     if (step < 4) {
       goNext()
       return
@@ -577,7 +623,7 @@ function App() {
               <div className="form-field"><label>Bio</label><textarea value={signup.bio} onChange={e=>handleSignupChange('bio', e.target.value)} placeholder="Share something interesting about yourself" rows={5} required/></div>
               <div className="form-field">
                 <label>Upload profile photos</label>
-                <input type="file" accept="image/*" multiple onChange={handleFileChange}/>
+                <input type="file" accept="image/*" multiple onChange={handleFileChange} required />
                 {signup.profileFiles && signup.profileFiles.length > 0 && <p className="file-note">Selected {signup.profileFiles.length} photo(s)</p>}
               </div>
             </>
@@ -585,14 +631,12 @@ function App() {
           {step === 4 && (
             <>
               <div className="form-field">
-                <label>Face verification (optional)</label>
-                <p className="hint">Please upload a selfie or capture one to verify your face matches your profile photo. You can skip this step.</p>
+                <label>Face verification</label>
+                <p className="hint">Please upload a selfie or capture one to verify your face matches your profile photo.</p>
                 <div className="form-field">
                   <label>Upload a selfie</label>
-                  <input type="file" accept="image/*" onChange={handleSelfieChange} />
-                  {signup.selfieFile && <p className="file-note">Selected selfie: {signup.selfieFile.name}</p>}
+                  <input type="file" accept="image/*" onChange={handleSelfieChange} required />
                 </div>
-
                 <div className="mt-3">
                   <FaceCapture onCapture={handleSelfieBlob} />
                 </div>
@@ -606,7 +650,7 @@ function App() {
 
                 <div className="mt-3">
                   <button type="button" className="secondary-button" onClick={verifyFace} disabled={faceVerifying}>{faceVerifying ? 'Verifying…' : 'Verify face'}</button>
-                  <button type="button" className="secondary-button" onClick={handleSkipVerification} disabled={faceVerifying} style={{marginLeft:8}}>Skip verification</button>
+                  <button type="button" className="secondary-button" onClick={handleSkipVerification} disabled={faceVerifying || !signup.selfieFile} style={{marginLeft:8}}>Skip verification</button>
                 </div>
 
                 {faceVerifyResult && (
