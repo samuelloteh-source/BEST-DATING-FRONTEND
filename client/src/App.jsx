@@ -56,8 +56,12 @@ function App() {
       return { minAge: 18, maxAge: 55, country: '', state: '', interests: [] }
     }
   })
-  const [step, setStep] = useState(1)
+  const [step, setStep] = useState(() => {
+    const savedStep = Number(localStorage.getItem('signupStep') || 0)
+    return savedStep >= 1 && savedStep <= 4 ? savedStep : 1
+  })
   const [message, setMessage] = useState('')
+  const [signupStepMessage, setSignupStepMessage] = useState('')
   const [loginEmail, setLoginEmail] = useState('')
   const [loginPassword, setLoginPassword] = useState('')
   const [signup, setSignup] = useState({
@@ -109,6 +113,10 @@ function App() {
   }, [authToken])
 
   useEffect(() => {
+    localStorage.setItem('signupStep', String(step))
+  }, [step])
+
+  useEffect(() => {
     localStorage.setItem('discoverFilters', JSON.stringify(discoverFilters))
   }, [discoverFilters])
 
@@ -140,6 +148,7 @@ function App() {
 
   const handleLogin = async (e) => {
     e.preventDefault()
+    localStorage.removeItem('signupStep')
     try {
       const res = await axios.post('/login', { email: loginEmail, password: loginPassword })
       if (res.data?.success) {
@@ -229,6 +238,31 @@ function App() {
     }
   }
 
+  const reverseGeocode = async (latitude, longitude) => {
+    const urls = [
+      `https://geocode.maps.co/reverse?lat=${latitude}&lon=${longitude}`,
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`
+    ]
+    for (const url of urls) {
+      try {
+        const response = await fetch(url, { headers: { Accept: 'application/json' } })
+        if (!response.ok) {
+          console.warn('Reverse geocode response not ok', url, response.status)
+          continue
+        }
+        const data = await response.json()
+        const country = data.address?.country || data.address?.country_code?.toUpperCase() || ''
+        const state = data.address?.state || data.address?.region || data.address?.county || data.address?.city || ''
+        if (country || state) {
+          return { country, state }
+        }
+      } catch (err) {
+        console.warn('Reverse geocode failed for', url, err)
+      }
+    }
+    throw new Error('Reverse geocoding failed.')
+  }
+
   const suggestLocation = async () => {
     setLocationError('')
     setLocationLoading(true)
@@ -243,15 +277,11 @@ function App() {
             navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 15000 })
           })
           const { latitude, longitude } = position.coords
-          const response = await fetch(`https://geocode.maps.co/reverse?lat=${latitude}&lon=${longitude}`)
-          if (!response.ok) {
-            throw new Error('Reverse geocoding failed.')
-          }
-          const data = await response.json()
-          country = data.address?.country || data.address?.country_code?.toUpperCase() || ''
-          state = data.address?.state || data.address?.region || data.address?.county || ''
+          const location = await reverseGeocode(latitude, longitude)
+          country = location.country
+          state = location.state
         } catch (geoErr) {
-          console.warn('Geolocation failed, falling back to IP lookup:', geoErr)
+          console.warn('Geolocation/reverse geocode failed, falling back to IP lookup:', geoErr)
         }
       }
 
@@ -309,6 +339,7 @@ function App() {
   const verifyFace = async () => {
     setFaceVerifying(true)
     setFaceVerifyResult(null)
+    console.log('verifyFace: started', { profileFiles: signup.profileFiles?.length || 0, hasSelfie: !!signup.selfieFile })
     try {
       const profileFile = signup.profileFiles?.[0]
       const selfieFile = signup.selfieFile
@@ -360,16 +391,21 @@ function App() {
       )
       const match = distance < 0.55
       const score = Math.max(0, 1 - distance)
+      console.log('verifyFace: computed descriptors', { distance, match, score })
 
       // Send result to server for validation/logging
+      console.log('verifyFace: sending to /verify/face')
       const res = await axios.post('/verify/face', { match, score, distance })
+      console.log('verifyFace: /verify/face response status', res.status)
       const result = res.data || { success: false, message: 'No response' }
+      console.log('verifyFace: /verify/face response data', result)
       setFaceVerifyResult(result)
       const passed = Boolean(result.success && result.match)
       setFaceVerified(passed)
       setFaceVerificationSkipped(false)
       URL.revokeObjectURL(profileUrl)
     } catch (err) {
+      console.error('verifyFace error', err, err?.response?.data)
       setFaceVerifyResult({ success: false, message: err.response?.data?.message || err.message })
       setFaceVerified(false)
       setFaceVerificationSkipped(false)
@@ -377,8 +413,16 @@ function App() {
       setFaceVerifying(false)
     }
   }
-  const goNext = () => setStep(s => Math.min(s + 1, 4))
-  const goBack = () => setStep(s=>Math.max(s-1,1))
+  const goNext = () => {
+    setMessage('')
+    setSignupStepMessage('')
+    setStep(s => Math.min(s + 1, 4))
+  }
+  const goBack = () => {
+    setMessage('')
+    setSignupStepMessage('')
+    setStep(s => Math.max(s - 1, 1))
+  }
   const navigateAppPage = (page) => {
     setCurrentPage(page)
     window.history.pushState({}, '', `/app/${page}`)
@@ -412,6 +456,7 @@ function App() {
       if (res.data?.success) {
         setMessage('Signup complete! Please log in.')
         setView('login')
+        localStorage.removeItem('signupStep')
         setStep(1)
         setSignup({ firstName:'', lastName:'', email:'', password:'', dob:'', country:'', stateRegion:'', interests:[], bio:'', profileFiles: [], selfieFile: null })
       } else {
@@ -430,13 +475,14 @@ function App() {
   const handleNext = async () => {
     if (step === 1) {
       if (!isValidEmail(signup.email)) {
-        setMessage('Please enter a valid email address before continuing.')
+        setSignupStepMessage('Please enter a valid email address before continuing.')
         return
       }
       if (!passwordStrong) {
-        setMessage('Password must be strong enough before continuing. Please meet all criteria.')
+        setSignupStepMessage('Password must be strong enough before continuing. Please meet all criteria.')
         return
       }
+      setSignupStepMessage('')
     }
     if (step < 4) {
       goNext()
@@ -466,7 +512,7 @@ function App() {
           </div>
           <button type="submit" className="primary-button">Login</button>
         </form>
-        <p className="page-note">Don't have an account? <button type="button" className="button-link" onClick={() => { setView('signup'); setStep(1); setMessage(''); window.history.pushState({}, '', '/signup') }}>Signup</button></p>
+        <p className="page-note">Don't have an account? <button type="button" className="button-link" onClick={() => { setView('signup'); setStep(1); setMessage(''); setSignupStepMessage(''); window.history.pushState({}, '', '/signup') }}>Signup</button></p>
         {message && <p className="form-message">{message}</p>}
       </div>
     </div>
@@ -485,6 +531,7 @@ function App() {
               <div className="form-field"><label>First name</label><input type="text" value={signup.firstName} onChange={e=>handleSignupChange('firstName', e.target.value)} placeholder="First name" required/></div>
               <div className="form-field"><label>Last name</label><input type="text" value={signup.lastName} onChange={e=>handleSignupChange('lastName', e.target.value)} placeholder="Last name" required/></div>
               <div className="form-field"><label>Email</label><input type="email" value={signup.email} onChange={e=>handleSignupChange('email', e.target.value)} placeholder="you@example.com" required/></div>
+              {signupStepMessage && <p className="form-message form-message--error">{signupStepMessage}</p>}
               <div className="form-field">
                 <label>Password</label>
                 <input

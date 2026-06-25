@@ -1,6 +1,10 @@
 import { useRef, useEffect, useState } from 'react'
 
-const faceapiScriptUrl = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js'
+const faceApiScriptUrls = [
+  'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.min.js',
+  'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js',
+  'https://unpkg.com/@vladmandic/face-api/dist/face-api.js'
+]
 
 export default function FaceCapture({ onCapture }) {
   const videoRef = useRef(null)
@@ -9,6 +13,8 @@ export default function FaceCapture({ onCapture }) {
   const [detecting, setDetecting] = useState(false)
   const [message, setMessage] = useState('')
   const [faceApiReady, setFaceApiReady] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState('')
+  const [capturedFile, setCapturedFile] = useState(null)
   const faceapiRef = useRef(null)
 
   useEffect(() => {
@@ -16,10 +22,36 @@ export default function FaceCapture({ onCapture }) {
 
     const loadFaceApiModels = async (faceapi) => {
       if (window.faceApiModelsLoaded) return
-      const modelUrl = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model'
-      await faceapi.nets.ssdMobilenetv1.loadFromUri(modelUrl)
-      await faceapi.nets.faceLandmark68Net.loadFromUri(modelUrl)
-      await faceapi.nets.faceRecognitionNet.loadFromUri(modelUrl)
+      const modelBaseUrls = [
+        'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model',
+        'https://unpkg.com/@vladmandic/face-api/model'
+      ]
+
+      const models = [
+        { name: 'ssdMobilenetv1', loader: (url) => faceapi.nets.ssdMobilenetv1.loadFromUri(url) },
+        { name: 'faceLandmark68Net', loader: (url) => faceapi.nets.faceLandmark68Net.loadFromUri(url) },
+        { name: 'faceRecognitionNet', loader: (url) => faceapi.nets.faceRecognitionNet.loadFromUri(url) }
+      ]
+
+      for (const m of models) {
+        let loaded = false
+        let lastErr = null
+        for (const base of modelBaseUrls) {
+          try {
+            setMessage(`Loading model ${m.name} from ${base}...`)
+            await m.loader(base)
+            loaded = true
+            break
+          } catch (e) {
+            console.warn(`Failed to load ${m.name} from ${base}`, e)
+            lastErr = e
+          }
+        }
+        if (!loaded) {
+          throw new Error(`Failed to load model ${m.name}: ${lastErr && lastErr.message}`)
+        }
+      }
+
       window.faceApiModelsLoaded = true
     }
 
@@ -51,29 +83,44 @@ export default function FaceCapture({ onCapture }) {
       return window.faceApiInitPromise
     }
 
-    const loadScript = () => {
+    const loadScriptFromUrl = (url) => {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement('script')
+        script.type = 'text/javascript'
+        script.crossOrigin = 'anonymous'
+        script.src = url
+        script.onload = () => resolve()
+        script.onerror = () => reject(new Error(`Face API script failed to load from ${url}`))
+        document.head.appendChild(script)
+      })
+    }
+
+    const loadScript = async () => {
       if (window.faceApiScriptLoaded) {
         return initFaceApi()
       }
-      window.faceApiScriptLoaded = true
-      return new Promise((resolve, reject) => {
-        const script = document.createElement('script')
-        script.src = faceapiScriptUrl
-        script.onload = async () => {
+      if (window.faceApiScriptLoadingPromise) {
+        return window.faceApiScriptLoadingPromise
+      }
+
+      window.faceApiScriptLoadingPromise = (async () => {
+        let lastError = null
+        for (const url of faceApiScriptUrls) {
           try {
-            await initFaceApi()
-            resolve()
+            await loadScriptFromUrl(url)
+            window.faceApiScriptLoaded = true
+            return await initFaceApi()
           } catch (err) {
-            reject(err)
+            console.warn(err)
+            lastError = err
           }
         }
-        script.onerror = () => {
-          console.error('Failed to load face-api')
-          if (mounted) setMessage('Face API failed to load. Please check your connection.')
-          reject(new Error('Face API script failed to load'))
-        }
-        document.head.appendChild(script)
-      })
+        window.faceApiScriptLoaded = false
+        delete window.faceApiScriptLoadingPromise
+        throw lastError || new Error('Face API script failed to load from all known URLs')
+      })()
+
+      return window.faceApiScriptLoadingPromise
     }
 
     if (!window.faceapi) {
@@ -87,8 +134,19 @@ export default function FaceCapture({ onCapture }) {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop())
       }
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl)
+      }
     }
   }, [])
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl)
+      }
+    }
+  }, [previewUrl])
 
   const startCamera = async () => {
     try {
@@ -119,6 +177,24 @@ export default function FaceCapture({ onCapture }) {
     if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
     streamRef.current = null
     setActive(false)
+  }
+
+  const retakeCapture = () => {
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl)
+    }
+    setPreviewUrl('')
+    setCapturedFile(null)
+    setMessage('')
+  }
+
+  const useCapture = () => {
+    if (!capturedFile) return
+    onCapture(capturedFile)
+    setMessage('Capture saved.')
+    setPreviewUrl('')
+    setCapturedFile(null)
+    stopCamera()
   }
 
   const capture = async () => {
@@ -153,9 +229,11 @@ export default function FaceCapture({ onCapture }) {
       }
       const file = new File([blob], `selfie-${Date.now()}.png`, { type: 'image/png' })
       file.descriptor = detections[0].descriptor
+      const url = URL.createObjectURL(blob)
+      setCapturedFile(file)
+      setPreviewUrl(url)
       onCapture(file)
-      stopCamera()
-      setMessage('')
+      setMessage('Capture saved. Preview below. Use the photo or retake it.')
     } catch (err) {
       console.error('Face detection error', err)
       setMessage('Error: ' + err.message)
@@ -180,6 +258,16 @@ export default function FaceCapture({ onCapture }) {
             </button>
             <button type="button" className="secondary-button" onClick={stopCamera} style={{marginLeft:8}} disabled={detecting}>Cancel</button>
           </div>
+          {previewUrl && (
+            <div style={{marginTop: 12}}>
+              <p style={{marginBottom: 8}}>Captured preview:</p>
+              <img src={previewUrl} alt="Captured preview" style={{maxWidth: '100%', borderRadius: 12, boxShadow: '0 0 0 1px rgba(0,0,0,0.08)'}} />
+              <div style={{marginTop: 8}}>
+                <button type="button" className="secondary-button" onClick={useCapture}>Use photo</button>
+                <button type="button" className="secondary-button" onClick={retakeCapture} style={{marginLeft:8}}>Retake</button>
+              </div>
+            </div>
+          )}
           {message && <p style={{marginTop: 8, fontSize: '0.9em', color: message.includes('Error') || message.includes('denied') ? '#d32f2f' : '#1976d2'}}>{message}</p>}
         </div>
       )}
