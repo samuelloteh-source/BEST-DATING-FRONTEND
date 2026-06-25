@@ -13,6 +13,7 @@ export default function FaceCapture({ onCapture }) {
   const [detecting, setDetecting] = useState(false)
   const [message, setMessage] = useState('')
   const [faceApiReady, setFaceApiReady] = useState(false)
+  const [videoReady, setVideoReady] = useState(false)
   const [loadingFaceApi, setLoadingFaceApi] = useState(false)
   const [previewUrl, setPreviewUrl] = useState('')
   const [capturedFile, setCapturedFile] = useState(null)
@@ -155,6 +156,7 @@ export default function FaceCapture({ onCapture }) {
   const startCamera = async () => {
     try {
       setMessage('')
+      setVideoReady(false)
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error('Camera API is not available in this browser.')
       }
@@ -163,6 +165,14 @@ export default function FaceCapture({ onCapture }) {
       if (videoRef.current) {
         videoRef.current.srcObject = stream
         await videoRef.current.play()
+        // wait for first frames / dimensions
+        let attempts = 0
+        while ((videoRef.current.videoWidth === 0 || videoRef.current.readyState < 2) && attempts < 10) {
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise(r => setTimeout(r, 200))
+          attempts++
+        }
+        if (videoRef.current.videoWidth > 0) setVideoReady(true)
       }
       setActive(true)
     } catch (err) {
@@ -186,6 +196,7 @@ export default function FaceCapture({ onCapture }) {
     if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
     streamRef.current = null
     setActive(false)
+    setVideoReady(false)
   }
 
   const retakeCapture = () => {
@@ -276,12 +287,16 @@ export default function FaceCapture({ onCapture }) {
       ) : (
         <div>
           <video ref={videoRef} autoPlay playsInline muted style={{maxWidth: '100%', borderRadius: 12}} />
-          <div style={{marginTop:8}}>
-            <button type="button" className="secondary-button" onClick={capture} disabled={detecting || !faceApiReady}>
-              {detecting ? 'Detecting face...' : faceApiReady ? 'Capture' : 'Loading…'}
-            </button>
-            <button type="button" className="secondary-button" onClick={stopCamera} style={{marginLeft:8}} disabled={detecting}>Cancel</button>
-          </div>
+          {!videoReady ? (
+            <p style={{marginTop:8, fontSize:'0.9em', color:'#1976d2'}}>Starting camera…</p>
+          ) : (
+            <div style={{marginTop:8}}>
+              <button type="button" className="secondary-button" onClick={capture} disabled={detecting || !faceApiReady}>
+                {detecting ? 'Detecting face...' : faceApiReady ? 'Capture' : 'Loading…'}
+              </button>
+              <button type="button" className="secondary-button" onClick={stopCamera} style={{marginLeft:8}} disabled={detecting}>Cancel</button>
+            </div>
+          )}
           {previewUrl && (
             <div style={{marginTop: 12}}>
               <p style={{marginBottom: 8}}>Captured preview:</p>
