@@ -197,6 +197,10 @@ function App() {
 
   const handleSignupChange = (field, value) => setSignup(prev => ({ ...prev, [field]: value }))
   const toggleInterest = (interest) => setSignup(prev => ({ ...prev, interests: prev.interests.includes(interest) ? prev.interests.filter(i=>i!==interest) : [...prev.interests, interest] }))
+  const [locationLoading, setLocationLoading] = useState(false)
+  const [locationSuggested, setLocationSuggested] = useState(false)
+  const [locationError, setLocationError] = useState('')
+  const [locationAutoDetected, setLocationAutoDetected] = useState(false)
 
   const getPasswordCriteria = (password) => ({
     length: password.length >= 10,
@@ -208,6 +212,77 @@ function App() {
 
   const passwordCriteria = getPasswordCriteria(signup.password || '')
   const passwordStrong = Object.values(passwordCriteria).every(Boolean)
+
+  const isValidEmail = (email) => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  }
+
+  const fetchIpLocation = async () => {
+    const ipResponse = await fetch('https://ipapi.co/json/')
+    if (!ipResponse.ok) {
+      throw new Error('IP location lookup failed.')
+    }
+    const ipData = await ipResponse.json()
+    return {
+      country: ipData.country_name || ipData.country || '',
+      state: ipData.region || ipData.region_code || ipData.city || ''
+    }
+  }
+
+  const suggestLocation = async () => {
+    setLocationError('')
+    setLocationLoading(true)
+    try {
+      let country = ''
+      let state = ''
+      const secureContext = window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+
+      if (secureContext && navigator.geolocation) {
+        try {
+          const position = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 15000 })
+          })
+          const { latitude, longitude } = position.coords
+          const response = await fetch(`https://geocode.maps.co/reverse?lat=${latitude}&lon=${longitude}`)
+          if (!response.ok) {
+            throw new Error('Reverse geocoding failed.')
+          }
+          const data = await response.json()
+          country = data.address?.country || data.address?.country_code?.toUpperCase() || ''
+          state = data.address?.state || data.address?.region || data.address?.county || ''
+        } catch (geoErr) {
+          console.warn('Geolocation failed, falling back to IP lookup:', geoErr)
+        }
+      }
+
+      if (!country && !state) {
+        const ipLocation = await fetchIpLocation()
+        country = country || ipLocation.country
+        state = state || ipLocation.state
+      }
+
+      if (!country && !state) {
+        throw new Error('Could not detect location automatically. Please enter it manually.')
+      }
+
+      if (country) handleSignupChange('country', country)
+      if (state) handleSignupChange('stateRegion', state)
+      setLocationSuggested(true)
+      setLocationError('')
+    } catch (err) {
+      console.error('Location detect error', err)
+      setLocationError(err.message || 'Unable to detect location.')
+    } finally {
+      setLocationLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (step === 2 && !locationAutoDetected) {
+      setLocationAutoDetected(true)
+      suggestLocation()
+    }
+  }, [step, locationAutoDetected])
 
   const resetFaceVerification = () => {
     setFaceVerified(false)
@@ -310,6 +385,11 @@ function App() {
   }
 
   const submitSignup = async () => {
+    if (!isValidEmail(signup.email)) {
+      setMessage('Please enter a valid email address before finishing signup.')
+      return
+    }
+
     if (signup.profileFiles?.[0] && signup.selfieFile && !faceVerified && !faceVerificationSkipped) {
       setMessage('Please verify your face or skip verification before finishing signup.')
       return
@@ -348,9 +428,15 @@ function App() {
   }
 
   const handleNext = async () => {
-    if (step === 1 && !passwordStrong) {
-      setMessage('Password must be strong enough before continuing. Please meet all criteria.')
-      return
+    if (step === 1) {
+      if (!isValidEmail(signup.email)) {
+        setMessage('Please enter a valid email address before continuing.')
+        return
+      }
+      if (!passwordStrong) {
+        setMessage('Password must be strong enough before continuing. Please meet all criteria.')
+        return
+      }
     }
     if (step < 4) {
       goNext()
@@ -392,6 +478,7 @@ function App() {
         <h1 className="page-title">Signup</h1>
         <p className="page-subtitle">Finish your profile in four quick steps.</p>
         <div className="step-indicator">Step {step} of 4</div>
+        {message && <p className="form-message form-message--error">{message}</p>}
         <form className="form-card" onSubmit={handleSignupSubmit}>
           {step === 1 && (
             <>
@@ -420,8 +507,21 @@ function App() {
           {step === 2 && (
             <>
               <div className="form-field"><label>Date of birth</label><input type="date" value={signup.dob} onChange={e=>handleSignupChange('dob', e.target.value)} required/></div>
-              <div className="form-field"><label>Country</label><input type="text" value={signup.country} onChange={e=>handleSignupChange('country', e.target.value)} placeholder="Country" required/></div>
-              <div className="form-field"><label>State or region</label><input type="text" value={signup.stateRegion} onChange={e=>handleSignupChange('stateRegion', e.target.value)} placeholder="State or region" required/></div>
+              <div className="form-field">
+                <label>Country</label>
+                <input type="text" value={signup.country} onChange={e=>handleSignupChange('country', e.target.value)} placeholder="Country" required/>
+              </div>
+              <div className="form-field">
+                <label>State or region</label>
+                <input type="text" value={signup.stateRegion} onChange={e=>handleSignupChange('stateRegion', e.target.value)} placeholder="State or region" required/>
+              </div>
+              <div className="form-field" style={{marginTop: 8}}>
+                <button type="button" className="secondary-button" onClick={suggestLocation} disabled={locationLoading}>
+                  {locationLoading ? 'Detecting location…' : 'Auto detect my location'}
+                </button>
+                {locationError && <p className="hint" style={{color:'#d32f2f', marginTop: 6}}>{locationError}</p>}
+                {locationSuggested && !locationLoading && <p className="hint" style={{marginTop: 6}}>Suggested location from browser. Edit if needed.</p>}
+              </div>
               <div className="form-field"><label>Interests</label><div className="interests-list">{interestOptions.map(i=> (<button key={i} type="button" className={signup.interests.includes(i)?'interest-button active':'interest-button'} onClick={()=>toggleInterest(i)}>{i}</button>))}</div></div>
             </>
           )}
