@@ -197,6 +197,18 @@ function App() {
 
   const handleSignupChange = (field, value) => setSignup(prev => ({ ...prev, [field]: value }))
   const toggleInterest = (interest) => setSignup(prev => ({ ...prev, interests: prev.interests.includes(interest) ? prev.interests.filter(i=>i!==interest) : [...prev.interests, interest] }))
+
+  const getPasswordCriteria = (password) => ({
+    length: password.length >= 10,
+    upper: /[A-Z]/.test(password),
+    lower: /[a-z]/.test(password),
+    number: /[0-9]/.test(password),
+    symbol: /[^A-Za-z0-9]/.test(password),
+  })
+
+  const passwordCriteria = getPasswordCriteria(signup.password || '')
+  const passwordStrong = Object.values(passwordCriteria).every(Boolean)
+
   const resetFaceVerification = () => {
     setFaceVerified(false)
     setFaceVerificationSkipped(false)
@@ -224,21 +236,64 @@ function App() {
     setFaceVerifyResult(null)
     try {
       const profileFile = signup.profileFiles?.[0]
-      const selfie = signup.selfieFile
-      if (!profileFile || !selfie) {
+      const selfieFile = signup.selfieFile
+      if (!profileFile || !selfieFile) {
         setFaceVerifyResult({ success: false, message: 'Profile photo and selfie are required for verification.' })
         setFaceVerifying(false)
         return
       }
-      const fd = new FormData()
-      fd.append('profile', profileFile)
-      fd.append('selfie', selfie)
-      const res = await axios.post('/verify/face', fd)
+
+      // Load face-api from window
+      if (!window.faceapi) {
+        setFaceVerifyResult({ success: false, message: 'Face API not loaded. Please try again.' })
+        setFaceVerifying(false)
+        return
+      }
+
+      const faceapi = window.faceapi
+      
+      // Selfie must have descriptor from camera capture
+      if (!selfieFile.descriptor) {
+        setFaceVerifyResult({ success: false, message: 'Please capture selfie using camera (not file upload) for face detection.' })
+        setFaceVerifying(false)
+        return
+      }
+
+      // Load profile photo and detect face
+      const profileUrl = URL.createObjectURL(profileFile)
+      const profileImg = new Image()
+      profileImg.crossOrigin = 'anonymous'
+      
+      await new Promise((resolve, reject) => {
+        profileImg.onload = resolve
+        profileImg.onerror = reject
+        profileImg.src = profileUrl
+      })
+
+      const profileDetections = await faceapi.detectAllFaces(profileImg).withFaceLandmarks().withFaceDescriptors()
+      if (!profileDetections || profileDetections.length === 0) {
+        setFaceVerifyResult({ success: false, message: 'No face detected in profile photo. Please upload a clear photo of your face.' })
+        setFaceVerifying(false)
+        return
+      }
+
+      const profileDescriptor = profileDetections[0].descriptor
+
+      // Compute euclidean distance between descriptors
+      const distance = Math.sqrt(
+        profileDescriptor.reduce((sum, v, i) => sum + Math.pow(v - selfieFile.descriptor[i], 2), 0)
+      )
+      const match = distance < 0.55
+      const score = Math.max(0, 1 - distance)
+
+      // Send result to server for validation/logging
+      const res = await axios.post('/verify/face', { match, score, distance })
       const result = res.data || { success: false, message: 'No response' }
       setFaceVerifyResult(result)
       const passed = Boolean(result.success && result.match)
       setFaceVerified(passed)
       setFaceVerificationSkipped(false)
+      URL.revokeObjectURL(profileUrl)
     } catch (err) {
       setFaceVerifyResult({ success: false, message: err.response?.data?.message || err.message })
       setFaceVerified(false)
@@ -293,6 +348,10 @@ function App() {
   }
 
   const handleNext = async () => {
+    if (step === 1 && !passwordStrong) {
+      setMessage('Password must be strong enough before continuing. Please meet all criteria.')
+      return
+    }
     if (step < 4) {
       goNext()
       return
@@ -339,7 +398,23 @@ function App() {
               <div className="form-field"><label>First name</label><input type="text" value={signup.firstName} onChange={e=>handleSignupChange('firstName', e.target.value)} placeholder="First name" required/></div>
               <div className="form-field"><label>Last name</label><input type="text" value={signup.lastName} onChange={e=>handleSignupChange('lastName', e.target.value)} placeholder="Last name" required/></div>
               <div className="form-field"><label>Email</label><input type="email" value={signup.email} onChange={e=>handleSignupChange('email', e.target.value)} placeholder="you@example.com" required/></div>
-              <div className="form-field"><label>Password</label><input type="password" value={signup.password} onChange={e=>handleSignupChange('password', e.target.value)} placeholder="Create a password" required/></div>
+              <div className="form-field">
+                <label>Password</label>
+                <input
+                  type="password"
+                  value={signup.password}
+                  onChange={e=>handleSignupChange('password', e.target.value)}
+                  placeholder="Create a password"
+                  required
+                />
+                <div className="password-criteria" style={{marginTop: 8, fontSize: '0.9rem', color: '#ccc'}}>
+                  <div style={{color: passwordCriteria.length ? '#7ed957' : '#ff6b6b'}}>• At least 10 characters</div>
+                  <div style={{color: passwordCriteria.upper ? '#7ed957' : '#ff6b6b'}}>• One uppercase letter</div>
+                  <div style={{color: passwordCriteria.lower ? '#7ed957' : '#ff6b6b'}}>• One lowercase letter</div>
+                  <div style={{color: passwordCriteria.number ? '#7ed957' : '#ff6b6b'}}>• One number</div>
+                  <div style={{color: passwordCriteria.symbol ? '#7ed957' : '#ff6b6b'}}>• One symbol</div>
+                </div>
+              </div>
             </>
           )}
           {step === 2 && (

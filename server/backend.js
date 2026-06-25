@@ -314,38 +314,13 @@ app.post('/signup', upload.array('photos', 10), async (req, res) => {
   }
 });
 
-// Face verification endpoint
-app.post('/verify/face', upload.fields([{ name: 'profile', maxCount: 1 }, { name: 'selfie', maxCount: 1 }]), async (req, res) => {
+// Face verification endpoint (client-side detection, server validates)
+app.post('/verify/face', async (req, res) => {
   try {
-    if (!canvasAvailable) {
-      return res.status(503).json({ success: false, message: 'Face verification service temporarily unavailable' });
+    const { match, score, distance } = req.body;
+    if (typeof match !== 'boolean' || typeof score !== 'number') {
+      return res.status(400).json({ success: false, message: 'Invalid verification data' });
     }
-
-    const profileFile = req.files && req.files.profile && req.files.profile[0]
-    const selfieFile = req.files && req.files.selfie && req.files.selfie[0]
-    if (!profileFile || !selfieFile) return res.status(400).json({ success: false, message: 'Missing profile or selfie file' })
-
-    const profilePath = path.join(UPLOADS_DIR, profileFile.filename)
-    const selfiePath = path.join(UPLOADS_DIR, selfieFile.filename)
-
-    console.log('Verify files:', profilePath, selfiePath)
-    const profileImage = await canvas.loadImage(profilePath)
-    const selfieImage = await canvas.loadImage(selfiePath)
-
-    const profileResult = await faceapi.detectSingleFace(profileImage).withFaceLandmarks().withFaceDescriptor()
-    const selfieResult = await faceapi.detectSingleFace(selfieImage).withFaceLandmarks().withFaceDescriptor()
-
-    if (!profileResult || !profileResult.descriptor) {
-      return res.status(400).json({ success: false, message: 'No face detected in profile photo' })
-    }
-    if (!selfieResult || !selfieResult.descriptor) {
-      return res.status(400).json({ success: false, message: 'No face detected in selfie' })
-    }
-
-    const distance = faceapi.euclideanDistance(profileResult.descriptor, selfieResult.descriptor)
-    const match = distance < 0.55
-    const score = Math.max(0, 1 - distance)
-
     return res.json({
       success: true,
       match,
@@ -354,9 +329,9 @@ app.post('/verify/face', upload.fields([{ name: 'profile', maxCount: 1 }, { name
       profileFaceDetected: true,
       selfieFaceDetected: true,
       threshold: 0.55,
-    })
+    });
   } catch (err) {
-    console.error('Face verification error:', err)
+    console.error('Face verification error:', err);
     return res.status(500).json({ success: false, message: 'Verification error' })
   }
 })
