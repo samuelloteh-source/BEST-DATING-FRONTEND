@@ -259,11 +259,11 @@ app.get('/api/admin/users', async (req, res) => {
 });
 app.post('/signup', upload.array('photos', 10), async (req, res) => {
   try {
-    const { name, dob, email, password, country, state, bio, interests } = req.body;
+    const { name, dob, email, password, country, state, bio, interests, gender, lookingFor } = req.body;
     const normalizedEmail = normalizeEmail(email);
 
-    if (!name || !normalizedEmail || !password || !dob) {
-      return res.status(400).json({ success: false, message: 'Name, email, password, and date of birth are required.' });
+    if (!name || !normalizedEmail || !password || !dob || !gender || !lookingFor) {
+      return res.status(400).json({ success: false, message: 'Name, email, password, date of birth, gender, and looking-for preferences are required.' });
     }
 
     const users = await loadUsers();
@@ -291,6 +291,8 @@ app.post('/signup', upload.array('photos', 10), async (req, res) => {
       country: sanitizeString(country) || '',
       state: sanitizeString(state) || '',
       bio: sanitizeString(bio) || '',
+      gender: sanitizeString(gender) || '',
+      lookingFor: sanitizeString(lookingFor) || '',
       interests: interestArray.slice(0, 5),
       photo: photoPath,
       avatar: photoPath,

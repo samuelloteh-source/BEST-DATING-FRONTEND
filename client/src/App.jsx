@@ -15,6 +15,9 @@ const interestOptions = [
   'swimming', 'hiking', 'gym & fitness', 'sports', 'jollof wars'
 ]
 
+const genderOptions = ['Man', 'Woman', 'Non-binary', 'Prefer not to say']
+const lookingForOptions = ['Men', 'Women', 'Non-binary people', 'Everyone']
+
 function App() {
   const [view, setView] = useState(() => {
     const path = window.location.pathname.replace(/\/$/, '')
@@ -66,6 +69,7 @@ function App() {
   const [loginPassword, setLoginPassword] = useState('')
   const [signup, setSignup] = useState({
     firstName: '', lastName: '', email: '', password: '', dob: '', country: '', stateRegion: '',
+    gender: '', lookingFor: '',
     interests: [], bio: '', profileFiles: [], selfieFile: null
   })
 
@@ -482,6 +486,8 @@ function App() {
       formData.append('state', signup.stateRegion)
       formData.append('interests', signup.interests.join(', '))
       formData.append('bio', signup.bio)
+      formData.append('gender', signup.gender)
+      formData.append('lookingFor', signup.lookingFor)
       signup.profileFiles?.forEach((file) => formData.append('photos', file))
       if (signup.selfieFile) formData.append('photos', signup.selfieFile)
 
@@ -491,7 +497,7 @@ function App() {
         setView('login')
         localStorage.removeItem('signupStep')
         setStep(1)
-        setSignup({ firstName:'', lastName:'', email:'', password:'', dob:'', country:'', stateRegion:'', interests:[], bio:'', profileFiles: [], selfieFile: null })
+        setSignup({ firstName:'', lastName:'', email:'', password:'', dob:'', country:'', stateRegion:'', gender:'', lookingFor:'', interests:[], bio:'', profileFiles: [], selfieFile: null })
         return true
       } else {
         setMessage('Signup failed: ' + (res.data?.message || 'Please try again.'))
@@ -634,6 +640,24 @@ function App() {
           {step === 2 && (
             <>
               <div className="form-field"><label>Date of birth</label><input type="date" value={signup.dob} onChange={e=>handleSignupChange('dob', e.target.value)} required/></div>
+              <div className="form-field">
+                <label>Gender</label>
+                <select value={signup.gender} onChange={e=>handleSignupChange('gender', e.target.value)} required>
+                  <option value="">Select your gender</option>
+                  {genderOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-field">
+                <label>Looking for</label>
+                <select value={signup.lookingFor} onChange={e=>handleSignupChange('lookingFor', e.target.value)} required>
+                  <option value="">Who are you looking to meet?</option>
+                  {lookingForOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
               <div className="form-field">
                 <label>Country</label>
                 <input type="text" value={signup.country} onChange={e=>handleSignupChange('country', e.target.value)} placeholder="Country" required/>
