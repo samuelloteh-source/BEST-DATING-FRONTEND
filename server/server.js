@@ -38,6 +38,7 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'sparkdating_jwt_secret';
 
 const http = require('http');
+const https = require('https');
 
 
 const typingStatus = {}; // in-memory typing indicator state
@@ -279,6 +280,42 @@ async function requireAuth(req, res, next) {
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '../client/index.html'));
 });
+
+// Proxy reverse geocode to a reliable provider to avoid client-side 401s / CORS
+app.get('/api/reverse-geocode', async (req, res) => {
+  const lat = req.query.lat
+  const lon = req.query.lon
+  if (!lat || !lon) return res.status(400).json({ error: 'lat and lon required' })
+
+  const email = encodeURIComponent(process.env.CONTACT_EMAIL || '')
+  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}${email ? `&email=${email}` : ''}`
+
+  try {
+    https.get(url, { headers: { 'User-Agent': process.env.APP_NAME || 'BEST-DATING-APP', Accept: 'application/json' } }, (proxyRes) => {
+      let body = ''
+      proxyRes.on('data', (chunk) => { body += chunk })
+      proxyRes.on('end', () => {
+        try {
+          if (proxyRes.statusCode && proxyRes.statusCode >= 400) {
+            return res.status(proxyRes.statusCode).json({ error: 'Reverse geocode provider error' })
+          }
+          const data = JSON.parse(body || '{}')
+          const country = data.address?.country || data.address?.country_code?.toUpperCase() || ''
+          const state = data.address?.state || data.address?.region || data.address?.county || data.address?.city || ''
+          return res.json({ country, state, raw: data })
+        } catch (e) {
+          return res.status(500).json({ error: 'Failed to parse reverse geocode response' })
+        }
+      })
+    }).on('error', (err) => {
+      console.warn('Reverse geocode proxy error', err && err.message)
+      return res.status(502).json({ error: 'Reverse geocode proxy error' })
+    })
+  } catch (err) {
+    console.error('Reverse geocode unexpected error', err)
+    return res.status(500).json({ error: 'Reverse geocode failed' })
+  }
+})
 
 async function loadUsersFromFile() {
   return db.loadUsersFromDb();

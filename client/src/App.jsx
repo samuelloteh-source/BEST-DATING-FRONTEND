@@ -239,6 +239,20 @@ function App() {
   }
 
   const reverseGeocode = async (latitude, longitude) => {
+    // Try server-side proxy first (avoids client 401/CORS issues)
+    try {
+      const proxyRes = await fetch(`/api/reverse-geocode?lat=${encodeURIComponent(latitude)}&lon=${encodeURIComponent(longitude)}`)
+      if (proxyRes.ok) {
+        const json = await proxyRes.json()
+        if (json && (json.country || json.state)) return { country: json.country || '', state: json.state || '' }
+      } else {
+        console.warn('Server reverse geocode proxy failed', proxyRes.status)
+      }
+    } catch (err) {
+      console.warn('Server reverse geocode proxy error', err)
+    }
+
+    // Fallback to client-side providers
     const urls = [
       `https://geocode.maps.co/reverse?lat=${latitude}&lon=${longitude}`,
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`
