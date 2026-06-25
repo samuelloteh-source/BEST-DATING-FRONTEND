@@ -14,6 +14,8 @@ export default function FaceCapture({ onCapture }) {
   const [message, setMessage] = useState('')
   const [faceApiReady, setFaceApiReady] = useState(false)
   const [videoReady, setVideoReady] = useState(false)
+  const videoListenersRef = useRef({})
+  const videoReadyTimeoutRef = useRef(null)
   const [loadingFaceApi, setLoadingFaceApi] = useState(false)
   const [previewUrl, setPreviewUrl] = useState('')
   const [capturedFile, setCapturedFile] = useState(null)
@@ -157,6 +159,18 @@ export default function FaceCapture({ onCapture }) {
     try {
       setMessage('')
       setVideoReady(false)
+      // clear any previous listeners/timeouts
+      if (videoReadyTimeoutRef.current) {
+        clearTimeout(videoReadyTimeoutRef.current)
+        videoReadyTimeoutRef.current = null
+      }
+      const cleanupVideoListeners = () => {
+        const v = videoRef.current
+        const l = videoListenersRef.current
+        if (v && l.playing) v.removeEventListener('playing', l.playing)
+        if (v && l.loaded) v.removeEventListener('loadedmetadata', l.loaded)
+        videoListenersRef.current = {}
+      }
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error('Camera API is not available in this browser.')
       }
@@ -164,15 +178,43 @@ export default function FaceCapture({ onCapture }) {
       streamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
-        await videoRef.current.play()
-        // wait for first frames / dimensions
-        let attempts = 0
-        while ((videoRef.current.videoWidth === 0 || videoRef.current.readyState < 2) && attempts < 10) {
-          // eslint-disable-next-line no-await-in-loop
-          await new Promise(r => setTimeout(r, 200))
-          attempts++
+        try {
+          await videoRef.current.play()
+        } catch (err) {
+          // autoplay policies may prevent play(); we'll rely on events
+          console.warn('video.play() failed', err)
         }
-        if (videoRef.current.videoWidth > 0) setVideoReady(true)
+
+        // set up listeners to detect when video frames arrive
+        const onPlaying = () => {
+          setVideoReady(true)
+          setMessage('')
+          if (videoReadyTimeoutRef.current) { clearTimeout(videoReadyTimeoutRef.current); videoReadyTimeoutRef.current = null }
+          if (videoListenersRef.current.playing) videoRef.current.removeEventListener('playing', videoListenersRef.current.playing)
+          if (videoListenersRef.current.loaded) videoRef.current.removeEventListener('loadedmetadata', videoListenersRef.current.loaded)
+          videoListenersRef.current = {}
+        }
+        const onLoaded = () => {
+          if (videoRef.current && videoRef.current.videoWidth > 0) {
+            setVideoReady(true)
+            setMessage('')
+            if (videoReadyTimeoutRef.current) { clearTimeout(videoReadyTimeoutRef.current); videoReadyTimeoutRef.current = null }
+          }
+        }
+        videoListenersRef.current.playing = onPlaying
+        videoListenersRef.current.loaded = onLoaded
+        videoRef.current.addEventListener('playing', onPlaying)
+        videoRef.current.addEventListener('loadedmetadata', onLoaded)
+
+        // fallback timeout: if no frames after 5s, show guidance
+        videoReadyTimeoutRef.current = setTimeout(() => {
+          if (!videoRef.current) return
+          if (videoRef.current.videoWidth === 0) {
+            setMessage('Camera started but no preview is available. Check browser camera permissions, close other apps using the camera, or try a different browser.')
+            setVideoReady(false)
+          }
+          videoReadyTimeoutRef.current = null
+        }, 5000)
       }
       setActive(true)
     } catch (err) {
@@ -197,6 +239,13 @@ export default function FaceCapture({ onCapture }) {
     streamRef.current = null
     setActive(false)
     setVideoReady(false)
+    // cleanup listeners and timeouts
+    try {
+      if (videoRef.current && videoListenersRef.current.playing) videoRef.current.removeEventListener('playing', videoListenersRef.current.playing)
+      if (videoRef.current && videoListenersRef.current.loaded) videoRef.current.removeEventListener('loadedmetadata', videoListenersRef.current.loaded)
+    } catch (e) {}
+    videoListenersRef.current = {}
+    if (videoReadyTimeoutRef.current) { clearTimeout(videoReadyTimeoutRef.current); videoReadyTimeoutRef.current = null }
   }
 
   const retakeCapture = () => {
