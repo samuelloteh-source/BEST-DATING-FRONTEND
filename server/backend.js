@@ -25,6 +25,7 @@ try {
 }
 
 const scheduler = require('./seeded-user-scheduler');
+const db = require('./db');
 
 const app = express();
 const cors = require('cors'); 
@@ -66,6 +67,16 @@ function sanitizeString(value) {
   return value.trim();
 }
 
+function normalizePhotoUrl(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (/^(https?:)?\/\//i.test(trimmed)) return trimmed;
+  if (trimmed.startsWith('/')) return trimmed;
+  if (trimmed.startsWith('uploads/')) return `/${trimmed}`;
+  return `/uploads/${trimmed}`;
+}
+
 function normalizeEmail(email) {
   return typeof email === 'string' ? email.trim().toLowerCase() : '';
 }
@@ -81,8 +92,8 @@ function cleanUserForClient(user) {
   const cleaned = {
     ...safe,
     email: normalizeEmail(safe.email),
-    photo: safe.photo || '',
-    avatar: safe.avatar || safe.photo || '',
+    photo: normalizePhotoUrl(safe.photo || ''),
+    avatar: normalizePhotoUrl(safe.avatar || safe.photo || ''),
     interests: Array.isArray(safe.interests) ? safe.interests : [],
     gallery: Array.isArray(safe.gallery) ? safe.gallery : [],
     notifications: Array.isArray(safe.notifications) ? safe.notifications : [],
@@ -119,19 +130,23 @@ async function writeJson(filePath, data) {
 }
 
 async function loadUsers() {
-  return await readJson(USERS_FILE, []);
+  await db.initDb();
+  return await db.loadUsersFromDb();
 }
 
 async function saveUsers(users) {
-  await writeJson(USERS_FILE, users);
+  await db.initDb();
+  await db.saveUsersToDb(users);
 }
 
 async function loadMessages() {
-  return await readJson(MESSAGES_FILE, []);
+  await db.initDb();
+  return await db.loadMessagesFromDb();
 }
 
 async function saveMessages(messages) {
-  await writeJson(MESSAGES_FILE, messages);
+  await db.initDb();
+  await db.saveMessagesToDb(messages);
 }
 
 async function persistSeedAutoLike(seedUserId, targetUserId) {
@@ -262,8 +277,8 @@ app.get('/api/admin/users', async (req, res) => {
       email: normalizeEmail(user.email),
       role: user.role || 'user',
       created_at: user.created_at || user.createdAt || null,
-      photo: user.photo || '',
-      avatar: user.avatar || user.photo || ''
+      photo: normalizePhotoUrl(user.photo || ''),
+      avatar: normalizePhotoUrl(user.avatar || user.photo || '')
     }));
     res.json(rows);
   } catch (err) {
@@ -935,6 +950,7 @@ async function loadFaceApiModels() {
 
 async function start() {
   await ensureStorage();
+  await db.initDb();
   await loadFaceApiModels();
   
   // Initialize seeded user scheduler on startup

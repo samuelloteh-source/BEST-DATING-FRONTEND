@@ -51,6 +51,16 @@ function sanitizeString(str) {
   return str.replace(/<\/?script[^>]*>/gi, '').trim();
 }
 
+function normalizePhotoUrl(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (/^(https?:)?\/\//i.test(trimmed)) return trimmed;
+  if (trimmed.startsWith('/')) return trimmed;
+  if (trimmed.startsWith('uploads/')) return `/${trimmed}`;
+  return `/uploads/${trimmed}`;
+}
+
 // Email transporter singleton (initialized lazily)
 let _transporter = null;
 async function getTransporter() {
@@ -160,6 +170,13 @@ async function sendPasswordResetEmail(user, token) {
 app.use(express.json());
 // Parse URL-encoded bodies (for admin login form POST)
 app.use(express.urlencoded({ extended: true }));
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    console.warn('Invalid JSON payload', req.method, req.path);
+    return res.status(400).json({ success: false, message: 'Invalid JSON payload' });
+  }
+  next(err);
+});
 app.use(express.static(path.join(__dirname, '../client')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
@@ -651,7 +668,10 @@ app.get('/me', requireAuth, (req, res) => {
 // Admin: suspend/unsuspend a user
 app.post('/admin/suspend', async (req, res) => {
   const { userId, suspend, pwd } = req.body;
-  if (pwd !== ADMIN_PASSWORD) return res.status(403).json({ success: false, message: 'Forbidden' });
+  const cookieAuth = (req.headers && req.headers.cookie) || '';
+  const cookieMatch = cookieAuth.split(';').map(c=>c.trim()).find(c=>c.startsWith('adminAuth='));
+  const cookieVal = cookieMatch ? decodeURIComponent(cookieMatch.split('=')[1]) : null;
+  if (pwd !== ADMIN_PASSWORD && cookieVal !== ADMIN_PASSWORD) return res.status(403).json({ success: false, message: 'Forbidden' });
   if (!userId || typeof suspend === 'undefined') return res.status(400).json({ success: false, message: 'Missing params' });
   const users = await loadUsersFromFile();
   const user = users.find(u => String(u.id) === String(userId));
@@ -664,7 +684,10 @@ app.post('/admin/suspend', async (req, res) => {
 // Admin: delete a user by id
 app.delete('/admin/user/:id', async (req, res) => {
   const pwd = req.query.pwd || (req.body && req.body.pwd);
-  if (pwd !== ADMIN_PASSWORD) return res.status(403).json({ success: false, message: 'Forbidden' });
+  const cookieAuth = (req.headers && req.headers.cookie) || '';
+  const cookieMatch = cookieAuth.split(';').map(c=>c.trim()).find(c=>c.startsWith('adminAuth='));
+  const cookieVal = cookieMatch ? decodeURIComponent(cookieMatch.split('=')[1]) : null;
+  if (pwd !== ADMIN_PASSWORD && cookieVal !== ADMIN_PASSWORD) return res.status(403).json({ success: false, message: 'Forbidden' });
   const userId = req.params.id;
   if (!userId) return res.status(400).json({ success: false, message: 'Missing id' });
   const users = await loadUsersFromFile();
@@ -1201,6 +1224,10 @@ app.post('/admin', async (req, res) => {
   }
 
   // If password correct, show users table
+  // Set an admin auth cookie so subsequent admin actions can be performed without re-sending the password
+  try {
+    res.cookie('adminAuth', ADMIN_PASSWORD, { httpOnly: true, sameSite: 'strict', maxAge: 60 * 60 * 1000, path: '/' });
+  } catch (e) { console.warn('Failed to set admin cookie', e); }
   const users = await loadUsersFromFile();
   const safeUsers = users.map(({password, ...user}) => user);
   
@@ -1229,20 +1256,22 @@ app.post('/admin', async (req, res) => {
   safeUsers.forEach(u => {
     const suspended = u.suspended ? true : false;
     const suspendLabel = suspended ? 'Unsuspend' : 'Suspend';
-    html += `<tr id="user-${u.id}"><td><img src="${u.photo || 'https://via.placeholder.com/50'}"></td><td>${u.name}</td><td>${u.email}</td><td>${u.dob}</td><td>${u.bio}</td><td>${u.likes ? u.likes.length : 0}</td><td><button class="suspendBtn" data-id="${u.id}">${suspendLabel}</button> <button class="deleteBtn" data-id="${u.id}">Delete</button></td></tr>`;
+    const photoUrl = normalizePhotoUrl(u.photo || u.avatar || '');
+    html += `<tr id="user-${u.id}"><td><img src="${photoUrl || 'https://via.placeholder.com/50'}"></td><td>${u.name}</td><td>${u.email}</td><td>${u.dob}</td><td>${u.bio}</td><td>${u.likes ? u.likes.length : 0}</td><td><button class="suspendBtn" data-id="${u.id}">${suspendLabel}</button> <button class="deleteBtn" data-id="${u.id}">Delete</button></td></tr>`;
   });
   
   html += `</table>
   <script>
     (function(){
+      const adminPassword = ${JSON.stringify(ADMIN_PASSWORD)};
       // After successful POST auth we keep password off the URL by reusing server-side checks
       document.querySelectorAll('.suspendBtn').forEach(b=>{
         b.addEventListener('click', async ()=>{
           const id = b.getAttribute('data-id');
           const suspend = b.textContent.trim() !== 'Unsuspend';
           b.disabled = true;
-          try {
-            const res = await fetch('/admin/suspend', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ userId: id, suspend, pwd: '' }) });
+                try {
+                const res = await fetch('/admin/suspend', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ userId: id, suspend, pwd: adminPassword }) });
             const j = await res.json();
             if (j.success) {
               b.textContent = suspend ? 'Unsuspend' : 'Suspend';
@@ -1259,7 +1288,7 @@ app.post('/admin', async (req, res) => {
           const id = b.getAttribute('data-id');
           b.disabled = true;
           try {
-            const res = await fetch('/admin/user/' + encodeURIComponent(id), { method: 'DELETE' });
+            const res = await fetch('/admin/user/' + encodeURIComponent(id), { method: 'DELETE', credentials: 'same-origin', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ pwd: adminPassword }) });
             const j = await res.json();
             if (j.success) {
               const row = document.getElementById('user-' + id);
@@ -1525,9 +1554,18 @@ io.on('connection', async (socket) => {
 
 async function startServer() {
   await db.initDb();
-  server.listen(PORT, '127.0.0.1', () => {
-    console.log(`Server running on http://127.0.0.1:${PORT}`);
-  });
+  try {
+    // Bind to 0.0.0.0 so the admin UI is reachable from other hosts on the network
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on http://0.0.0.0:${PORT}`);
+    });
+  } catch (err) {
+    console.error('Failed to start server:', err && err.message ? err.message : err);
+    if (err && err.code === 'EADDRINUSE') {
+      console.error(`Port ${PORT} is already in use. Set PORT to a different value and try again.`);
+    }
+    throw err;
+  }
 }
 
 startServer().catch((err) => {
