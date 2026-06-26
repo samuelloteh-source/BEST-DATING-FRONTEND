@@ -501,7 +501,9 @@ function App() {
         return false
       }
     } catch (err) {
-      setMessage('Error: ' + (err.response?.data?.message || err.message))
+      console.error('submitSignup error', err?.response?.status, err?.response?.data, err?.message)
+      const serverMsg = err.response?.data?.message || err.response?.data || err.message
+      setMessage('Error: ' + serverMsg)
       return false
     }
   }
