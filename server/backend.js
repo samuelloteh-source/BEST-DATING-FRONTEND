@@ -15,10 +15,10 @@ let canvasAvailable = false;
 
 try {
   canvas = require('canvas');
-  faceapi = require('@vladmandic/face-api');
-  tf = require('@tensorflow/tfjs-node');
-  const { Canvas, Image, ImageData } = canvas;
-  faceapi.env.monkeyPatch({ Canvas, Image, ImageData });
+  faceapi = require('face-api.js');
+  tf = require('@tensorflow/tfjs');
+  const { Canvas, Image, ImageData, loadImage } = canvas;
+  faceapi.env.monkeyPatch({ Canvas, Image, ImageData, loadImage });
   canvasAvailable = true;
 } catch (err) {
   console.warn('⚠️  Canvas/face-api modules not available - face verification disabled:', err.message);
@@ -973,9 +973,9 @@ async function loadFaceApiModels() {
     return;
   }
   
-  const modelPath = path.join(__dirname, 'node_modules', '@vladmandic', 'face-api', 'model');
-  await faceapi.tf.setBackend('tensorflow');
-  await faceapi.tf.ready();
+  const modelPath = path.join(__dirname, 'models');
+  await tf.setBackend('cpu');
+  await tf.ready();
   await faceapi.nets.ssdMobilenetv1.loadFromDisk(modelPath);
   await faceapi.nets.faceLandmark68Net.loadFromDisk(modelPath);
   await faceapi.nets.faceRecognitionNet.loadFromDisk(modelPath);

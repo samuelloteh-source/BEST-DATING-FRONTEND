@@ -1,4 +1,5 @@
 const express = require('express');
+const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
@@ -41,6 +42,7 @@ function maybeUpload(req, res, next) {
 }
 
 const app = express();
+let faceMatchService = null;
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'sparkdating_jwt_secret';
 
@@ -174,7 +176,8 @@ async function sendPasswordResetEmail(user, token) {
 }
 
 // Middleware - must be before routes
-app.use(express.json());
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
 // Parse URL-encoded bodies (for admin login form POST)
 app.use(express.urlencoded({ extended: true }));
 app.use((err, req, res, next) => {
@@ -298,6 +301,11 @@ function getUserById(userId, users = null) {
   return pool.find(u => String(u.id) === String(userId));
 }
 
+globalThis.getUserById = async function globalGetUserById(userId) {
+  const users = await loadUsersFromFile();
+  return getUserById(userId, users);
+};
+
 function createNotification(text, partnerId) {
   return {
     id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -331,6 +339,18 @@ async function requireAuth(req, res, next) {
 // Serve index.html on root
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '../client/index.html'));
+});
+
+app.post('/verify-face', async (req, res) => {
+  try {
+    if (!faceMatchService) {
+      faceMatchService = await import('./services/faceMatch.js');
+    }
+    return faceMatchService.verifyFaceHandler(req, res);
+  } catch (err) {
+    console.error('Face verify route failed', err);
+    return res.status(500).json({ match: false, reason: 'Face verification service unavailable' });
+  }
 });
 
 // Proxy reverse geocode to a reliable provider to avoid client-side 401s / CORS
