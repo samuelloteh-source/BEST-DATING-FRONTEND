@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const sqlite3 = require('sqlite3');
+let sqlite3;
 let Pool;
 try {
   ({ Pool } = require('pg'));
@@ -13,6 +13,13 @@ const DB_MODE = process.env.DB_MODE
   : process.env.NODE_ENV === 'production'
     ? 'postgres'
     : 'sqlite';
+
+// Only require sqlite3 if we actually intend to use it. Requiring the native
+// sqlite3 module at top-level causes Vercel serverless functions to attempt
+// loading a binary incompatible with the runtime (GLIBC mismatch).
+if (DB_MODE === 'sqlite') {
+  sqlite3 = require('sqlite3');
+}
 
 const SQLITE_FILE = path.join(__dirname, 'database.sqlite');
 const USERS_FILE = path.join(__dirname, 'users.json');
