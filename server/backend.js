@@ -52,7 +52,7 @@ const MESSAGES_FILE = path.join(__dirname, 'messages.json');
 
 // Use memory storage for uploads on serverless platforms to avoid writing into the
 // read-only function bundle. For local dev use disk storage so files are visible.
-const uploadStorage = process.env.VERCEL ? multer.memoryStorage() : multer.diskStorage({
+const uploadStorage = (process.env.NODE_ENV === 'production') ? multer.memoryStorage() : multer.diskStorage({
   destination: UPLOADS_DIR,
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname || '').toLowerCase();
