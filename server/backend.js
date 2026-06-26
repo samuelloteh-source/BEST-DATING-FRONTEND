@@ -39,6 +39,7 @@ const io = socketIo(server, {
 });
 const PORT = Number(process.env.PORT || 3001);
 const JWT_SECRET = process.env.JWT_SECRET || 'sparkdating_jwt_secret';
+const INACTIVITY_TIMEOUT_MS = Number(process.env.INACTIVITY_TIMEOUT_MS) || 20 * 60 * 1000; // 20 minutes
 // Use the canonical data files in the server folder to avoid multiple user stores
 const DATA_DIR = path.join(__dirname); // keep for compatibility
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
@@ -209,6 +210,19 @@ async function authMiddleware(req, res, next) {
     return res.status(401).json({ success: false, message: 'User not found' });
   }
 
+  // Inactivity timeout: require re-login after period of inactivity
+  try {
+    const last = Number(user.lastActivity || 0);
+    if (last && (Date.now() - last) > INACTIVITY_TIMEOUT_MS) {
+      return res.status(401).json({ success: false, message: 'Session inactive. Please sign in again.' });
+    }
+    // Update last activity and persist
+    user.lastActivity = Date.now();
+    await saveUsers(users);
+  } catch (e) {
+    console.warn('Failed to update lastActivity:', e && e.message ? e.message : e);
+  }
+
   req.user = user;
   req.userId = String(user.id);
   next();
@@ -358,6 +372,12 @@ app.post('/login', async (req, res) => {
     }
 
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '24h' });
+    try {
+      user.lastActivity = Date.now();
+      await saveUsers(users);
+    } catch (e) {
+      console.warn('Could not persist lastActivity on login:', e && e.message ? e.message : e);
+    }
     return res.json({ success: true, user: cleanUserForClient(user), token });
   } catch (err) {
     console.error('Login error:', err);
