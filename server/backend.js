@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const fs = require('fs').promises;
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 const http = require('http');
 const socketIo = require('socket.io');
@@ -43,20 +44,25 @@ const JWT_SECRET = process.env.JWT_SECRET || 'sparkdating_jwt_secret';
 const INACTIVITY_TIMEOUT_MS = Number(process.env.INACTIVITY_TIMEOUT_MS) || 20 * 60 * 1000; // 20 minutes
 // Use the canonical data files in the server folder to avoid multiple user stores
 const DATA_DIR = path.join(__dirname); // keep for compatibility
-const UPLOADS_DIR = path.join(__dirname, 'uploads');
+// Use a writable temp dir when running as a serverless function (e.g. Vercel)
+const UPLOADS_DIR = process.env.VERCEL ? path.join(os.tmpdir(), 'uploads') : path.join(__dirname, 'uploads');
 const CLIENT_DIST_DIR = path.join(__dirname, '../client/dist');
 const USERS_FILE = path.join(__dirname, 'users.json');
 const MESSAGES_FILE = path.join(__dirname, 'messages.json');
 
+// Use memory storage for uploads on serverless platforms to avoid writing into the
+// read-only function bundle. For local dev use disk storage so files are visible.
+const uploadStorage = process.env.VERCEL ? multer.memoryStorage() : multer.diskStorage({
+  destination: UPLOADS_DIR,
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const base = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    cb(null, ext ? `${base}${ext}` : base);
+  }
+});
+
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: UPLOADS_DIR,
-    filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname || '').toLowerCase();
-      const base = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-      cb(null, ext ? `${base}${ext}` : base);
-    }
-  }),
+  storage: uploadStorage,
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (!file.mimetype || !file.mimetype.startsWith('image/')) {
@@ -120,7 +126,10 @@ function cleanUserForClient(user) {
 
 async function ensureStorage() {
   await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.mkdir(UPLOADS_DIR, { recursive: true });
+  // Only try to create an uploads dir if we're using disk storage
+  if (!process.env.VERCEL) {
+    await fs.mkdir(UPLOADS_DIR, { recursive: true });
+  }
 }
 
 async function readJson(filePath, fallback) {
