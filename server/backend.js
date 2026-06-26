@@ -44,6 +44,7 @@ const INACTIVITY_TIMEOUT_MS = Number(process.env.INACTIVITY_TIMEOUT_MS) || 20 * 
 // Use the canonical data files in the server folder to avoid multiple user stores
 const DATA_DIR = path.join(__dirname); // keep for compatibility
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
+const CLIENT_DIST_DIR = path.join(__dirname, '../client/dist');
 const USERS_FILE = path.join(__dirname, 'users.json');
 const MESSAGES_FILE = path.join(__dirname, 'messages.json');
 
@@ -917,14 +918,6 @@ app.delete('/api/user/account', authMiddleware, async (req, res) => {
   }
 });
 
-if (process.env.NODE_ENV === 'production') {
-  const clientDist = path.join(__dirname, '../client/dist');
-  app.use(express.static(clientDist));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(clientDist, 'index.html')); 
-  });
-}
-
 // Socket.io connection handling
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
@@ -972,14 +965,20 @@ async function loadFaceApiModels() {
     console.warn('⚠️  Skipping FaceAPI model loading - canvas/faceapi not available');
     return;
   }
-  
+
   const modelPath = path.join(__dirname, 'models');
   await tf.setBackend('cpu');
   await tf.ready();
-  await faceapi.nets.ssdMobilenetv1.loadFromDisk(modelPath);
-  await faceapi.nets.faceLandmark68Net.loadFromDisk(modelPath);
-  await faceapi.nets.faceRecognitionNet.loadFromDisk(modelPath);
-  console.log('FaceAPI models loaded from', modelPath);
+
+  try {
+    await faceapi.nets.ssdMobilenetv1.loadFromDisk(modelPath);
+    await faceapi.nets.faceLandmark68Net.loadFromDisk(modelPath);
+    await faceapi.nets.faceRecognitionNet.loadFromDisk(modelPath);
+    console.log('FaceAPI models loaded from', modelPath);
+  } catch (err) {
+    console.warn('⚠️  FaceAPI model loading failed, continuing without server-side face models:', err.message || err);
+    canvasAvailable = false;
+  }
 }
 
 async function start() {
@@ -1009,7 +1008,23 @@ async function start() {
   });
 }
 
-start().catch(err => {
-  console.error('Failed to start backend:', err);
-  process.exit(1);
-});
+if (require.main === module) {
+  start().catch(err => {
+    console.error('Failed to start backend:', err);
+    process.exit(1);
+  });
+}
+
+// Serve client static build and SPA fallback after all API routes to avoid
+// shadowing API endpoints (e.g. /health, /signup).
+try {
+  const clientDist = path.join(__dirname, '../client/dist');
+  app.use(express.static(clientDist));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(clientDist, 'index.html'));
+  });
+} catch (err) {
+  console.warn('Static client serving not enabled:', err.message || err);
+}
+
+module.exports = app;
