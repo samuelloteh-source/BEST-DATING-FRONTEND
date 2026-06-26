@@ -1,4 +1,5 @@
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 let sqlite3;
 let Pool;
@@ -8,11 +9,30 @@ try {
   // pg may not be installed in local dev until dependencies are updated
 }
 
-const DB_MODE = process.env.DB_MODE
+const isServerless = Boolean(process.env.VERCEL || process.env.VERCEL_ENV || process.env.NOW_BUILDER);
+const explicitDbMode = process.env.DB_MODE
   ? process.env.DB_MODE.toLowerCase()
-  : process.env.NODE_ENV === 'production'
+  : null;
+const hasPostgresConfig = Boolean(
+  Pool && (
+    process.env.DATABASE_URL ||
+    process.env.PGHOST ||
+    process.env.PGUSER ||
+    process.env.PGDATABASE
+  )
+);
+
+const requestedDbMode = explicitDbMode
+  ? explicitDbMode
+  : hasPostgresConfig
     ? 'postgres'
-    : 'sqlite';
+    : isServerless
+      ? 'json'
+      : 'sqlite';
+
+const DB_MODE = requestedDbMode === 'sqlite' && isServerless
+  ? 'json'
+  : requestedDbMode;
 
 // Only require sqlite3 if we actually intend to use it. Requiring the native
 // sqlite3 module at top-level causes Vercel serverless functions to attempt
@@ -21,11 +41,16 @@ if (DB_MODE === 'sqlite') {
   sqlite3 = require('sqlite3');
 }
 
-const SQLITE_FILE = path.join(__dirname, 'database.sqlite');
+const DATA_DIR = isServerless
+  ? path.join(os.tmpdir(), 'best-dating-data')
+  : __dirname;
+const SQLITE_FILE = path.join(DATA_DIR, 'database.sqlite');
 const USERS_FILE = path.join(__dirname, 'users.json');
 const MESSAGES_FILE = path.join(__dirname, 'messages.json');
+const JSON_DB_FILE = path.join(DATA_DIR, 'database.json');
 
 let client = null;
+let jsonStore = null;
 
 function buildPgPlaceholders(count, offset = 1) {
   return Array.from({ length: count }, (_, idx) => `$${idx + offset}`).join(', ');
@@ -56,6 +81,49 @@ function sqliteAll(db, sql, params = []) {
       resolve(rows);
     });
   });
+}
+
+async function loadJsonStore() {
+  try {
+    const contents = await fs.promises.readFile(JSON_DB_FILE, 'utf8');
+    jsonStore = JSON.parse(contents);
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      jsonStore = {
+        users: [],
+        messages: [],
+        pending_signups: [],
+        user_likes: [],
+        matches: []
+      };
+      await saveJsonStore();
+    } else {
+      throw err;
+    }
+  }
+  return jsonStore;
+}
+
+async function saveJsonStore() {
+  if (!jsonStore) jsonStore = {
+    users: [],
+    messages: [],
+    pending_signups: [],
+    user_likes: [],
+    matches: []
+  };
+  await fs.promises.mkdir(DATA_DIR, { recursive: true });
+  await fs.promises.writeFile(JSON_DB_FILE, JSON.stringify(jsonStore, null, 2), 'utf8');
+}
+
+async function initJson() {
+  await loadJsonStore();
+  return {
+    mode: 'json',
+    query: async () => { throw new Error('JSON mode does not support raw SQL queries'); },
+    run: async () => { throw new Error('JSON mode does not support raw SQL runs'); },
+    transaction: async (fn) => fn({ mode: 'json' })
+  };
 }
 
 async function initSqlite() {
@@ -125,6 +193,19 @@ async function initPostgres() {
 
 async function ensureTables() {
   if (!client) throw new Error('DB client is not initialized');
+
+  if (client.mode === 'json') {
+    if (!jsonStore) {
+      await loadJsonStore();
+    }
+    jsonStore.users = Array.isArray(jsonStore.users) ? jsonStore.users : [];
+    jsonStore.messages = Array.isArray(jsonStore.messages) ? jsonStore.messages : [];
+    jsonStore.pending_signups = Array.isArray(jsonStore.pending_signups) ? jsonStore.pending_signups : [];
+    jsonStore.user_likes = Array.isArray(jsonStore.user_likes) ? jsonStore.user_likes : [];
+    jsonStore.matches = Array.isArray(jsonStore.matches) ? jsonStore.matches : [];
+    await saveJsonStore();
+    return;
+  }
 
   if (client.mode === 'sqlite') {
     await client.run(`CREATE TABLE IF NOT EXISTS users (
@@ -208,6 +289,16 @@ function parseRow(row) {
 }
 
 async function loadUsersFromDb() {
+  if (client.mode === 'json') {
+    return jsonStore.users.map((u) => {
+      const user = typeof u === 'string' ? JSON.parse(u) : u;
+      if (!user) return user;
+      if (!user.password && user.passwordHash) {
+        user.password = user.passwordHash;
+      }
+      return user;
+    }).filter(Boolean);
+  }
   const rows = await client.query('SELECT data FROM users ORDER BY created_at ASC');
   const users = rows.map(parseRow).filter(Boolean);
   // Some older JSON files use `passwordHash` instead of `password`.
@@ -222,25 +313,44 @@ async function loadUsersFromDb() {
 }
 
 async function loadPendingSignupsFromDb() {
+  if (client.mode === 'json') {
+    return jsonStore.pending_signups.map((u) => typeof u === 'string' ? JSON.parse(u) : u).filter(Boolean);
+  }
   const rows = await client.query('SELECT data FROM pending_signups ORDER BY created_at ASC');
   return rows.map(parseRow).filter(Boolean);
 }
 
 async function loadMessagesFromDb() {
+  if (client.mode === 'json') {
+    return jsonStore.messages.map((m) => typeof m === 'string' ? JSON.parse(m) : m).filter(Boolean);
+  }
   const rows = await client.query('SELECT data FROM messages ORDER BY created_at ASC');
   return rows.map(parseRow).filter(Boolean);
 }
 
 async function countTable(table) {
-  if (client.mode === 'sqlite') {
-    const rows = await client.query(`SELECT COUNT(*) AS count FROM ${table}`);
-    return Number(rows[0]?.count || 0);
+  if (client.mode === 'json') {
+    if (table === 'users') return jsonStore.users.length;
+    if (table === 'messages') return jsonStore.messages.length;
+    if (table === 'pending_signups') return jsonStore.pending_signups.length;
+    if (table === 'user_likes') return jsonStore.user_likes.length;
+    if (table === 'matches') return jsonStore.matches.length;
+    return 0;
   }
   const rows = await client.query(`SELECT COUNT(*) AS count FROM ${table}`);
   return Number(rows[0]?.count || 0);
 }
 
 async function saveUsersToDb(users) {
+  if (client.mode === 'json') {
+    jsonStore.users = users.map(u => {
+      const user = { ...u };
+      return user;
+    });
+    await saveJsonStore();
+    return;
+  }
+
   const data = users.map(u => ({
     id: String(u.id),
     email: u.email || '',
@@ -280,6 +390,14 @@ async function saveUsersToDb(users) {
 }
 
 async function savePendingSignupsToDb(signups) {
+  if (client.mode === 'json') {
+    jsonStore.pending_signups = signups.map(u => ({
+      ...u
+    }));
+    await saveJsonStore();
+    return;
+  }
+
   const data = signups.map(u => ({
     token: String(u.token),
     email: u.email || '',
@@ -319,6 +437,12 @@ async function savePendingSignupsToDb(signups) {
 }
 
 async function saveMessagesToDb(messages) {
+  if (client.mode === 'json') {
+    jsonStore.messages = messages.map(m => ({ ...m }));
+    await saveJsonStore();
+    return;
+  }
+
   const data = messages.map(m => ({
     id: String(m.id),
     json: JSON.stringify(m),
@@ -382,11 +506,21 @@ async function seedFromJsonIfNeeded() {
 }
 
 async function addLike(userId, likedUserId) {
+  if (client.mode === 'json') {
+    const exists = jsonStore.user_likes.some(l => l.user_id === userId && l.liked_user_id === likedUserId);
+    if (!exists) {
+      jsonStore.user_likes.push({
+        id: `${userId}_${likedUserId}_${Date.now()}`,
+        user_id: userId,
+        liked_user_id: likedUserId,
+        created_at: Date.now()
+      });
+      await saveJsonStore();
+    }
+    return;
+  }
   const id = `${userId}_${likedUserId}_${Date.now()}`;
   if (client.mode === 'sqlite') {
-    await client.run('INSERT OR REPLACE INTO user_likes (id, user_id, liked_user_id, created_at) VALUES (?, ?, ?, ?)',
-      [id, userId, likedUserId, Date.now()]);
-  } else {
     await client.query(
       'INSERT INTO user_likes (id, user_id, liked_user_id, created_at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
       [id, userId, likedUserId, Date.now()]);
@@ -394,6 +528,9 @@ async function addLike(userId, likedUserId) {
 }
 
 async function hasUserLiked(userId, likedUserId) {
+  if (client.mode === 'json') {
+    return jsonStore.user_likes.some(l => l.user_id === userId && l.liked_user_id === likedUserId);
+  }
   const likes = await client.query(
     client.mode === 'sqlite' 
       ? 'SELECT id FROM user_likes WHERE user_id = ? AND liked_user_id = ?' 
@@ -404,6 +541,22 @@ async function hasUserLiked(userId, likedUserId) {
 }
 
 async function createMatch(userId1, userId2) {
+  if (client.mode === 'json') {
+    const exists = jsonStore.matches.some(m =>
+      (m.user1_id === userId1 && m.user2_id === userId2) ||
+      (m.user1_id === userId2 && m.user2_id === userId1)
+    );
+    if (!exists) {
+      jsonStore.matches.push({
+        id: `match_${Math.min(userId1, userId2)}_${Math.max(userId1, userId2)}_${Date.now()}`,
+        user1_id: userId1,
+        user2_id: userId2,
+        created_at: Date.now()
+      });
+      await saveJsonStore();
+    }
+    return;
+  }
   const id = `match_${Math.min(userId1, userId2)}_${Math.max(userId1, userId2)}_${Date.now()}`;
   const user1_id = userId1;
   const user2_id = userId2;
@@ -419,6 +572,9 @@ async function createMatch(userId1, userId2) {
 }
 
 async function getMatches(userId) {
+  if (client.mode === 'json') {
+    return jsonStore.matches.filter(m => m.user1_id === userId || m.user2_id === userId);
+  }
   const matches = await client.query(
     client.mode === 'sqlite'
       ? 'SELECT * FROM matches WHERE user1_id = ? OR user2_id = ?'
@@ -429,6 +585,12 @@ async function getMatches(userId) {
 }
 
 async function isMatched(userId1, userId2) {
+  if (client.mode === 'json') {
+    return jsonStore.matches.some(m =>
+      (m.user1_id === userId1 && m.user2_id === userId2) ||
+      (m.user1_id === userId2 && m.user2_id === userId1)
+    );
+  }
   const matches = await client.query(
     client.mode === 'sqlite'
       ? 'SELECT id FROM matches WHERE (user1_id = ? AND user2_id = ?) OR (user1_id = ? AND user2_id = ?)'
@@ -445,8 +607,10 @@ async function initDb() {
 
   if (DB_MODE === 'postgres') {
     client = await initPostgres();
-  } else {
+  } else if (DB_MODE === 'sqlite') {
     client = await initSqlite();
+  } else {
+    client = await initJson();
   }
 
   await ensureTables();
