@@ -17,6 +17,7 @@ export default defineConfig({
       '/resend-verification': { target: BACKEND_TARGET, changeOrigin: true },
       '/verify-email': { target: BACKEND_TARGET, changeOrigin: true },
       '/verify/face': { target: BACKEND_TARGET, changeOrigin: true },
+      '/uploads': { target: BACKEND_TARGET, changeOrigin: true },
       '/discover': { target: BACKEND_TARGET, changeOrigin: true },
       '/matches': { target: BACKEND_TARGET, changeOrigin: true },
       '/likes': { target: BACKEND_TARGET, changeOrigin: true },
