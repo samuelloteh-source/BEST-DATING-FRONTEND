@@ -48,7 +48,14 @@ const USERS_FILE = path.join(__dirname, 'users.json');
 const MESSAGES_FILE = path.join(__dirname, 'messages.json');
 
 const upload = multer({
-  dest: UPLOADS_DIR,
+  storage: multer.diskStorage({
+    destination: UPLOADS_DIR,
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname || '').toLowerCase();
+      const base = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      cb(null, ext ? `${base}${ext}` : base);
+    }
+  }),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (!file.mimetype || !file.mimetype.startsWith('image/')) {
@@ -262,6 +269,33 @@ app.use((req, res, next) => {
   next();
 });
 
+function detectImageContentType(buffer) {
+  if (!buffer || buffer.length < 4) return 'application/octet-stream';
+  const sig = buffer.subarray(0, 12);
+  const hex = sig.toString('hex');
+  if (hex.startsWith('ffd8ff')) return 'image/jpeg';
+  if (hex.startsWith('89504e47')) return 'image/png';
+  if (hex.startsWith('47494638')) return 'image/gif';
+  if (hex.startsWith('52494646') && sig.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+  return 'application/octet-stream';
+}
+
+app.use('/uploads', async (req, res, next) => {
+  const fileName = (req.path || '').replace(/^\/+/, '').split('/')[0];
+  if (!fileName || fileName.includes('..')) return next();
+  const filePath = path.join(UPLOADS_DIR, fileName);
+  try {
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile()) return next();
+    const buffer = await fs.readFile(filePath);
+    const contentType = detectImageContentType(buffer);
+    res.set('Content-Type', contentType);
+    res.set('Cache-Control', 'public, max-age=31536000');
+    return res.send(buffer);
+  } catch (err) {
+    return next();
+  }
+});
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 app.get('/me', authMiddleware, async (req, res) => {

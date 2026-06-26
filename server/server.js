@@ -14,8 +14,15 @@ const db = require('./db');
 dotenv.config({ path: path.join(__dirname, '.env') });
 
 // Multer with file size limits and image type filter
-const upload = multer({ 
-  dest: 'uploads/',
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: path.join(__dirname, 'uploads'),
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname || '').toLowerCase();
+      const base = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      cb(null, ext ? `${base}${ext}` : base);
+    }
+  }),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
   fileFilter: (req, file, cb) => {
     if (!file.mimetype || !file.mimetype.startsWith('image/')) {
@@ -178,6 +185,34 @@ app.use((err, req, res, next) => {
   next(err);
 });
 app.use(express.static(path.join(__dirname, '../client')));
+
+function detectImageContentType(buffer) {
+  if (!buffer || buffer.length < 4) return 'application/octet-stream';
+  const sig = buffer.subarray(0, 12);
+  const hex = sig.toString('hex');
+  if (hex.startsWith('ffd8ff')) return 'image/jpeg';
+  if (hex.startsWith('89504e47')) return 'image/png';
+  if (hex.startsWith('47494638')) return 'image/gif';
+  if (hex.startsWith('52494646') && sig.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+  return 'application/octet-stream';
+}
+
+app.use('/uploads', async (req, res, next) => {
+  const fileName = (req.path || '').replace(/^\/+/, '').split('/')[0];
+  if (!fileName || fileName.includes('..')) return next();
+  const filePath = path.join(__dirname, 'uploads', fileName);
+  try {
+    const stat = await fs.promises.stat(filePath);
+    if (!stat.isFile()) return next();
+    const buffer = await fs.promises.readFile(filePath);
+    const contentType = detectImageContentType(buffer);
+    res.set('Content-Type', contentType);
+    res.set('Cache-Control', 'public, max-age=31536000');
+    return res.send(buffer);
+  } catch (err) {
+    return next();
+  }
+});
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Simple CORS policy — restrict to allowed origins only
@@ -1239,31 +1274,62 @@ app.post('/admin', async (req, res) => {
     <style>
       body { background: #111; color: white; font-family: Arial; padding: 20px; }
       h1 { color: red; }
+      .toolbar { display: flex; gap: 12px; align-items: center; margin: 12px 0 16px; flex-wrap: wrap; }
+      .toolbar input { flex: 1; min-width: 240px; padding: 10px 12px; border-radius: 8px; border: 1px solid #444; background: #222; color: white; }
       table { width: 100%; border-collapse: collapse; margin-top: 20px; }
       th, td { border: 1px solid #333; padding: 12px; text-align: left; }
       th { background: red; color: white; }
       tr:nth-child(even) { background: #222; }
-      img { width: 50px; height: 50px; border-radius: 50%; object-fit: cover; }
+      img { width: 50px; height: 50px; border-radius: 50%; object-fit: cover; background: #333; }
+      .muted { color: #aaa; }
     </style>
   </head>
   <body>
     <h1>⚡ SPARK Admin Panel</h1>
     <p>Total Users: ${safeUsers.length}</p>
+    <div class="toolbar">
+      <input id="userSearch" type="search" placeholder="Search by name or email" />
+      <span id="resultsCount" class="muted">Showing ${safeUsers.length} users</span>
+    </div>
     <table>
       <tr><th>Photo</th><th>Name</th><th>Email</th><th>DOB</th><th>Bio</th><th>Likes</th><th>Actions</th></tr>
   `;
   
+  const fallbackAvatar = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="100%" height="100%" fill="#333"/><circle cx="48" cy="36" r="20" fill="#777"/><path d="M18 84c8-16 22-24 30-24s22 8 30 24" fill="#777"/></svg>');
+  const uploadsDir = path.join(__dirname, 'uploads');
   safeUsers.forEach(u => {
     const suspended = u.suspended ? true : false;
     const suspendLabel = suspended ? 'Unsuspend' : 'Suspend';
     const photoUrl = normalizePhotoUrl(u.photo || u.avatar || '');
-    html += `<tr id="user-${u.id}"><td><img src="${photoUrl || 'https://via.placeholder.com/50'}"></td><td>${u.name}</td><td>${u.email}</td><td>${u.dob}</td><td>${u.bio}</td><td>${u.likes ? u.likes.length : 0}</td><td><button class="suspendBtn" data-id="${u.id}">${suspendLabel}</button> <button class="deleteBtn" data-id="${u.id}">Delete</button></td></tr>`;
+    const safeName = String(u.name || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const safeEmail = String(u.email || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const safeBio = String(u.bio || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const photoFileName = photoUrl && photoUrl.startsWith('/uploads/') ? photoUrl.replace('/uploads/', '') : '';
+    const hasFileOnDisk = photoFileName ? fs.existsSync(path.join(uploadsDir, photoFileName)) : false;
+    const imageSrc = hasFileOnDisk ? photoUrl : fallbackAvatar;
+    html += `<tr id="user-${u.id}" data-search="${safeName.toLowerCase()} ${safeEmail.toLowerCase()}"><td><img src="${imageSrc}" alt="${safeName}" onerror="this.onerror=null;this.src='${fallbackAvatar}';"></td><td>${safeName}</td><td>${safeEmail}</td><td>${String(u.dob || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td><td>${safeBio}</td><td>${u.likes ? u.likes.length : 0}</td><td><button class="suspendBtn" data-id="${u.id}">${suspendLabel}</button> <button class="deleteBtn" data-id="${u.id}">Delete</button></td></tr>`;
   });
   
   html += `</table>
   <script>
     (function(){
       const adminPassword = ${JSON.stringify(ADMIN_PASSWORD)};
+      const searchInput = document.getElementById('userSearch');
+      const resultsCount = document.getElementById('resultsCount');
+      const rows = Array.from(document.querySelectorAll('tr[id^="user-"]'));
+      const updateFilter = () => {
+        const query = (searchInput.value || '').trim().toLowerCase();
+        let visible = 0;
+        rows.forEach(row => {
+          const haystack = row.getAttribute('data-search') || '';
+          const matches = !query || haystack.includes(query);
+          row.style.display = matches ? '' : 'none';
+          if (matches) visible += 1;
+        });
+        resultsCount.textContent = 'Showing ' + visible + ' users';
+      };
+      searchInput.addEventListener('input', updateFilter);
+      updateFilter();
       // After successful POST auth we keep password off the URL by reusing server-side checks
       document.querySelectorAll('.suspendBtn').forEach(b=>{
         b.addEventListener('click', async ()=>{
