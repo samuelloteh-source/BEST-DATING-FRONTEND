@@ -46,3 +46,5 @@ uploads/
 *.mp4
 *.jpg
 *.png
+.vercel
+.env*
