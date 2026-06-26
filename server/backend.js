@@ -50,16 +50,9 @@ const CLIENT_DIST_DIR = path.join(__dirname, '../client/dist');
 const USERS_FILE = path.join(__dirname, 'users.json');
 const MESSAGES_FILE = path.join(__dirname, 'messages.json');
 
-// Use memory storage for uploads on serverless platforms to avoid writing into the
-// read-only function bundle. For local dev use disk storage so files are visible.
-const uploadStorage = (process.env.NODE_ENV === 'production') ? multer.memoryStorage() : multer.diskStorage({
-  destination: UPLOADS_DIR,
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname || '').toLowerCase();
-    const base = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    cb(null, ext ? `${base}${ext}` : base);
-  }
-});
+// Always use memory storage to avoid invoking multer.diskStorage() at module
+// load time in serverless environments where the function bundle is read-only.
+const uploadStorage = multer.memoryStorage();
 
 const upload = multer({
   storage: uploadStorage,
@@ -126,9 +119,11 @@ function cleanUserForClient(user) {
 
 async function ensureStorage() {
   await fs.mkdir(DATA_DIR, { recursive: true });
-  // Only try to create an uploads dir if we're using disk storage
-  if (!process.env.VERCEL) {
+  // Ensure uploads dir exists (tmp dir on serverless or local uploads dir)
+  try {
     await fs.mkdir(UPLOADS_DIR, { recursive: true });
+  } catch (err) {
+    console.warn('Could not create uploads directory:', err && err.message ? err.message : err);
   }
 }
 
