@@ -367,7 +367,6 @@ function App() {
         return
       }
 
-      // Load face-api from window
       if (!window.faceapi) {
         setFaceVerifyResult({ success: false, message: 'Face API not loaded. Please try again.' })
         setFaceVerifying(false)
@@ -375,43 +374,42 @@ function App() {
       }
 
       const faceapi = window.faceapi
-      
-      // Selfie must have descriptor from camera capture
-      if (!selfieFile.descriptor) {
-        setFaceVerifyResult({ success: false, message: 'Please capture selfie using camera (not file upload) for face detection.' })
-        setFaceVerifying(false)
-        return
+
+      const loadImageFromFile = async (file) => {
+        const url = URL.createObjectURL(file)
+        const img = new Image()
+        img.crossOrigin = 'anonymous'
+        await new Promise((resolve, reject) => {
+          img.onload = resolve
+          img.onerror = reject
+          img.src = url
+        })
+        return { img, url }
       }
 
-      // Load profile photo and detect face
-      const profileUrl = URL.createObjectURL(profileFile)
-      const profileImg = new Image()
-      profileImg.crossOrigin = 'anonymous'
-      
-      await new Promise((resolve, reject) => {
-        profileImg.onload = resolve
-        profileImg.onerror = reject
-        profileImg.src = profileUrl
-      })
-
-      const profileDetections = await faceapi.detectAllFaces(profileImg).withFaceLandmarks().withFaceDescriptors()
-      if (!profileDetections || profileDetections.length === 0) {
-        setFaceVerifyResult({ success: false, message: 'No face detected in profile photo. Please upload a clear photo of your face.' })
-        setFaceVerifying(false)
-        return
+      const getDescriptorFromFile = async (file, label) => {
+        const { img, url } = await loadImageFromFile(file)
+        try {
+          const detections = await faceapi.detectAllFaces(img).withFaceLandmarks().withFaceDescriptors()
+          if (!detections || detections.length === 0) {
+            throw new Error(`No face detected in ${label}. Please upload a clear photo of your face.`)
+          }
+          return detections[0].descriptor
+        } finally {
+          URL.revokeObjectURL(url)
+        }
       }
 
-      const profileDescriptor = profileDetections[0].descriptor
+      const profileDescriptor = await getDescriptorFromFile(profileFile, 'profile photo')
+      const selfieDescriptor = selfieFile.descriptor || await getDescriptorFromFile(selfieFile, 'selfie')
 
-      // Compute euclidean distance between descriptors
       const distance = Math.sqrt(
-        profileDescriptor.reduce((sum, v, i) => sum + Math.pow(v - selfieFile.descriptor[i], 2), 0)
+        profileDescriptor.reduce((sum, v, i) => sum + Math.pow(v - selfieDescriptor[i], 2), 0)
       )
       const match = distance < 0.55
       const score = Math.max(0, 1 - distance)
       console.log('verifyFace: computed descriptors', { distance, match, score })
 
-      // Send result to server for validation/logging
       console.log('verifyFace: sending to /verify/face')
       const res = await axios.post('/verify/face', { match, score, distance })
       console.log('verifyFace: /verify/face response status', res.status)
@@ -421,7 +419,6 @@ function App() {
       const passed = Boolean(result.success && result.match)
       setFaceVerified(passed)
       setFaceVerificationSkipped(false)
-      URL.revokeObjectURL(profileUrl)
     } catch (err) {
       console.error('verifyFace error', err, err?.response?.data)
       setFaceVerifyResult({ success: false, message: err.response?.data?.message || err.message })
