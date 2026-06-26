@@ -421,7 +421,11 @@ function App() {
       setFaceVerificationSkipped(false)
     } catch (err) {
       console.error('verifyFace error', err, err?.response?.data)
-      setFaceVerifyResult({ success: false, message: err.response?.data?.message || err.message })
+      if (!err.response) {
+        setFaceVerifyResult({ success: false, message: 'Network error: unable to reach server. Please check your connection or try again.' })
+      } else {
+        setFaceVerifyResult({ success: false, message: err.response?.data?.message || err.message })
+      }
       setFaceVerified(false)
       setFaceVerificationSkipped(false)
     } finally {

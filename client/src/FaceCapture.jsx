@@ -365,6 +365,10 @@ export default function FaceCapture({ onCapture }) {
       setCapturedFile(file)
       setPreviewUrl(url)
       onCapture(file)
+      // stop camera after capture so preview is the single visible image
+      try {
+        stopCamera()
+      } catch (e) {}
     } catch (err) {
       console.error('Capture error', err)
       setMessage('Error: ' + (err.message || 'capture failed'))
@@ -381,29 +385,34 @@ export default function FaceCapture({ onCapture }) {
           {message && <p style={{marginTop: 8, fontSize: '0.9em', color: message.includes('Error') || message.includes('denied') ? '#d32f2f' : '#1976d2'}}>{message}</p>}
         </div>
       ) : (
-        <div>
-          <video ref={videoRef} autoPlay playsInline muted style={{maxWidth: '100%', borderRadius: 12}} />
-          {!videoReady ? (
+            <div>
+          {/* show video preview while active */}
+          {(!previewUrl) && (
+            <video ref={videoRef} autoPlay playsInline muted style={{maxWidth: '100%', borderRadius: 12}} />
+          )}
+          {!videoReady && !previewUrl ? (
             <p style={{marginTop:8, fontSize:'0.9em', color:'#1976d2'}}>Starting camera…</p>
           ) : (
-                <div style={{marginTop:8}}>
-                  <button type="button" className="secondary-button" onClick={capture} disabled={detecting}>
-                    {detecting ? 'Detecting face...' : (faceApiReady ? 'Capture' : 'Capture (no face detection)')}
-                  </button>
-                  <button type="button" className="secondary-button" onClick={stopCamera} style={{marginLeft:8}} disabled={detecting}>Cancel</button>
-                </div>
-          )}
-          {previewUrl && (
-            <div style={{marginTop: 12}}>
-              <p style={{marginBottom: 8}}>Captured preview:</p>
-              <img src={previewUrl} alt="Captured preview" style={{maxWidth: '100%', borderRadius: 12, boxShadow: '0 0 0 1px rgba(0,0,0,0.08)'}} />
-              <div style={{marginTop: 8}}>
-                <button type="button" className="secondary-button" onClick={useCapture}>Use photo</button>
-                <button type="button" className="secondary-button" onClick={retakeCapture} style={{marginLeft:8}}>Retake</button>
-              </div>
+            <div style={{marginTop:8}}>
+              <button type="button" className="secondary-button" onClick={capture} disabled={detecting}>
+                {detecting ? 'Detecting face...' : (faceApiReady ? 'Capture' : 'Capture (no face detection)')}
+              </button>
+              <button type="button" className="secondary-button" onClick={stopCamera} style={{marginLeft:8}} disabled={detecting}>Cancel</button>
             </div>
           )}
           {message && <p style={{marginTop: 8, fontSize: '0.9em', color: message.includes('Error') || message.includes('denied') ? '#d32f2f' : '#1976d2'}}>{message}</p>}
+        </div>
+      )}
+
+      {/* Always show captured preview if available, even when camera stopped */}
+      {previewUrl && (
+        <div style={{marginTop: 12}}>
+          <p style={{marginBottom: 8}}>Captured preview:</p>
+          <img src={previewUrl} alt="Captured preview" style={{maxWidth: '100%', borderRadius: 12, boxShadow: '0 0 0 1px rgba(0,0,0,0.08)'}} />
+          <div style={{marginTop: 8}}>
+            <button type="button" className="secondary-button" onClick={useCapture}>Use photo</button>
+            <button type="button" className="secondary-button" onClick={retakeCapture} style={{marginLeft:8}}>Retake</button>
+          </div>
         </div>
       )}
     </div>
