@@ -305,17 +305,15 @@ export default function FaceCapture({ onCapture }) {
   }
 
   const capture = async () => {
-    if (!videoRef.current || !faceapiRef.current || !faceApiReady) {
-      setMessage('Face detection models are not ready yet. Please wait a moment and try again.')
+    if (!videoRef.current) {
+      setMessage('Camera preview not available. Please try again.')
       return
     }
 
     setDetecting(true)
-    setMessage('Detecting face...')
 
     try {
       const video = videoRef.current
-      const faceapi = faceapiRef.current
 
       // Wait briefly for the video element to have valid dimensions / data
       let attempts = 0
@@ -324,18 +322,6 @@ export default function FaceCapture({ onCapture }) {
         // eslint-disable-next-line no-await-in-loop
         await new Promise(r => setTimeout(r, 200))
         attempts++
-      }
-
-      // Run detection with a timeout so the UI doesn't hang indefinitely
-      const detectPromise = faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors()
-      const detections = await Promise.race([
-        detectPromise,
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Face detection timed out')), 5000))
-      ])
-
-      if (!detections || detections.length === 0) {
-        setMessage('No face detected. Please try again.')
-        return
       }
 
       const canvas = document.createElement('canvas')
@@ -350,15 +336,38 @@ export default function FaceCapture({ onCapture }) {
         return
       }
       const file = new File([blob], `selfie-${Date.now()}.png`, { type: 'image/png' })
-      file.descriptor = detections[0].descriptor
+
+      // If face-api is available and ready, attempt detection and attach descriptor
+      if (faceapiRef.current && faceApiReady) {
+        setMessage('Detecting face...')
+        try {
+          const faceapi = faceapiRef.current
+          const detectPromise = faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors()
+          const detections = await Promise.race([
+            detectPromise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Face detection timed out')), 5000))
+          ])
+          if (detections && detections.length > 0) {
+            file.descriptor = detections[0].descriptor
+          } else {
+            // no detections: leave descriptor undefined
+            setMessage('No face detected; captured image saved without verification data.')
+          }
+        } catch (err) {
+          console.warn('Face detection failed during capture, saving image without descriptor', err)
+          setMessage('Face detection failed; captured image saved without verification data.')
+        }
+      } else {
+        setMessage('Face detection not available; captured image saved without verification data.')
+      }
+
       const url = URL.createObjectURL(blob)
       setCapturedFile(file)
       setPreviewUrl(url)
       onCapture(file)
-      setMessage('Capture saved. Preview below. Use the photo or retake it.')
     } catch (err) {
-      console.error('Face detection error', err)
-      setMessage('Error: ' + err.message)
+      console.error('Capture error', err)
+      setMessage('Error: ' + (err.message || 'capture failed'))
     } finally {
       setDetecting(false)
     }
@@ -377,12 +386,12 @@ export default function FaceCapture({ onCapture }) {
           {!videoReady ? (
             <p style={{marginTop:8, fontSize:'0.9em', color:'#1976d2'}}>Starting camera…</p>
           ) : (
-            <div style={{marginTop:8}}>
-              <button type="button" className="secondary-button" onClick={capture} disabled={detecting || !faceApiReady}>
-                {detecting ? 'Detecting face...' : faceApiReady ? 'Capture' : 'Loading…'}
-              </button>
-              <button type="button" className="secondary-button" onClick={stopCamera} style={{marginLeft:8}} disabled={detecting}>Cancel</button>
-            </div>
+                <div style={{marginTop:8}}>
+                  <button type="button" className="secondary-button" onClick={capture} disabled={detecting}>
+                    {detecting ? 'Detecting face...' : (faceApiReady ? 'Capture' : 'Capture (no face detection)')}
+                  </button>
+                  <button type="button" className="secondary-button" onClick={stopCamera} style={{marginLeft:8}} disabled={detecting}>Cancel</button>
+                </div>
           )}
           {previewUrl && (
             <div style={{marginTop: 12}}>

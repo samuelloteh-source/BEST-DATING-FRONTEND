@@ -488,7 +488,7 @@ function App() {
       signup.profileFiles?.forEach((file) => formData.append('photos', file))
       if (signup.selfieFile) formData.append('photos', signup.selfieFile)
 
-      const res = await axios.post('/signup', formData)
+      const res = await axios.post('/signup', formData, { timeout: 60000 })
       if (res.data?.success) {
         setMessage('Signup complete! Please log in.')
         setView('login')
@@ -502,8 +502,12 @@ function App() {
       }
     } catch (err) {
       console.error('submitSignup error', err?.response?.status, err?.response?.data, err?.message)
-      const serverMsg = err.response?.data?.message || err.response?.data || err.message
-      setMessage('Error: ' + serverMsg)
+      if (!err.response) {
+        setMessage('Network error: unable to reach server. Please check your connection or try again.')
+      } else {
+        const serverMsg = err.response?.data?.message || err.response?.data || err.message
+        setMessage('Error: ' + serverMsg)
+      }
       return false
     }
   }
