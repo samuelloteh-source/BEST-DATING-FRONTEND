@@ -16,7 +16,7 @@
       "handle": "filesystem"
     },
     {
-      "src": "^/(signup|login|logout|verify/face|resend-verification|me|notifications|discover|matches|likes|messages|profile/gallery|api/.*|uploads/.*)$",
+      "src": "^/(signup|login|logout|verify/face|resend-verification|me|notifications|discover|matches|likes|messages|profile/gallery|api/.*|uploads/.*|health)$",
       "dest": "/server/backend.js"
     },
     {
