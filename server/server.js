@@ -10,9 +10,20 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const dns = require('dns').promises;
-const db = require('./db');
 
-dotenv.config({ path: path.join(__dirname, '.env') });
+const envPaths = [
+  path.join(__dirname, '..', '.env'),
+  path.join(__dirname, '.env')
+];
+const envPath = envPaths.find((p) => fs.existsSync(p));
+if (envPath) {
+  dotenv.config({ path: envPath });
+} else {
+  dotenv.config();
+}
+
+const db = require('./db');
+const User = require('./models/User');
 
 // Multer with file size limits and image type filter
 const upload = multer({
@@ -265,7 +276,12 @@ function resolveUserByToken(token, users) {
     try {
       const payload = jwt.verify(token, JWT_SECRET);
       if (!payload || !payload.id) return null;
-      return users.find(u => String(u.id) === String(payload.id));
+      const user = users.find(u => String(u.id) === String(payload.id));
+      if (!user) return null;
+      const expectedSessionVersion = Number(user.sessionVersion || 0);
+      const suppliedSessionVersion = Number(payload.sessionVersion || 0);
+      if (suppliedSessionVersion !== expectedSessionVersion) return null;
+      return user;
     } catch (err) {
       return null;
     }
@@ -465,58 +481,22 @@ app.post('/signup', maybeUpload, async (req, res) => {
 
     // Geolocation-based signup restrictions removed — no country-based blocking
 
-    let [users, pendingSignups] = await Promise.all([loadUsersFromFile(), loadPendingSignupsFromFile()]);
-    pendingSignups = cleanupPendingSignups(pendingSignups);
-
-    if (users.find(u => normalizeEmail(u.email) === email)) {
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
       return res.json({ success: false, message: 'Email already exists' });
     }
 
-    const existingPending = pendingSignups.find(p => normalizeEmail(p.email) === email);
     const hashedPassword = await bcrypt.hash(password, 10);
-    const vtoken = existingPending?.token || generateToken();
-    const expiresAt = Date.now() + 3600 * 1000;
-
-    const pendingUser = {
-      id: existingPending?.id || Date.now().toString(),
-      token: vtoken,
-      email,
+    await User.create({
       name,
-      dob,
-      gender: gender || '',
-      country: country || '',
-      state: state || '',
-      bio,
-      password: hashedPassword,
-      photo,
-      interests,
-      lookingFor,
-      likes: [],
-      messages: [],
-      emailVerified: false,
-      created_at: Date.now(),
-      expires_at: expiresAt
-    };
-
-    if (existingPending) {
-      pendingSignups = pendingSignups.map(p => normalizeEmail(p.email) === email ? pendingUser : p);
-    } else {
-      pendingSignups.push(pendingUser);
-    }
-
-    await savePendingSignupsToFile(pendingSignups);
-    const emailResult = await sendVerificationEmail(pendingUser, vtoken);
-    if (emailResult.error) {
-      console.warn('Signup email send failed for', email, emailResult.error);
-      return res.status(500).json({ success: false, message: 'Unable to send verification email. Please try again later.' });
-    }
-
-    console.log('Pending signup created:', email);
-    res.json({
-      success: true,
-      message: 'Please verify your email before logging in.',
-      previewUrl: emailResult?.previewUrl || null
+      email,
+      passwordHash: hashedPassword,
+      photoUrl: photo,
+      createdAt: new Date()
     });
+
+    console.log('User created in MongoDB:', email);
+    res.json({ success: true, message: 'Signup successful. You may now log in.' });
   } catch (err) {
     console.error('SIGNUP ERROR:', err);
     res.status(500).json({ success: false, message: err.message });
@@ -554,6 +534,7 @@ app.post('/login', async (req, res) => {
       return res.json({ success: false, message: 'Wrong password' });
     }
 
+    user.sessionVersion = Number(user.sessionVersion || 0) + 1;
     user.authToken = generateToken();
     user.authTokenExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
     await saveUsersToFile(users);
@@ -566,7 +547,7 @@ app.post('/login', async (req, res) => {
       path: '/'
     });
 
-    const jwtToken = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '24h' });
+    const jwtToken = jwt.sign({ id: user.id, email: user.email, sessionVersion: user.sessionVersion }, JWT_SECRET, { expiresIn: '24h' });
     res.json({ success: true, user: cleanUserForClient(user), token: jwtToken });
   } catch (err) {
     console.error('LOGIN ERROR:', err);
@@ -672,9 +653,14 @@ app.post('/like', requireAuth, async (req, res) => {
 app.get('/users', requireAuth, async (req, res) => {
   const currentUser = req.user;
   const users = await loadUsersFromFile();
-  const usersNoPassword = users
-    .filter(u => !u.suspended && u.emailVerified !== false)
-    .map(({ password, ...u }) => u);
+
+  const visibleUsers = users.filter(u => !u.suspended && u.emailVerified !== false);
+  const usersWithoutCurrent = visibleUsers.filter(u => String(u.id) !== String(currentUser.id));
+  const usersForDisplay = usersWithoutCurrent.length > 0
+    ? usersWithoutCurrent
+    : users.filter(u => String(u.id) !== String(currentUser.id));
+
+  const usersNoPassword = usersForDisplay.map(({ password, ...u }) => u);
 
   // convert bios to first person for front-end display
   function escapeRegExp(string) {
@@ -915,6 +901,7 @@ app.post('/logout', requireAuth, async (req, res) => {
   const users = await loadUsersFromFile();
   const user = getUserById(req.userId, users);
   if (user) {
+    user.sessionVersion = Number(user.sessionVersion || 0) + 1;
     delete user.authToken;
     delete user.authTokenExpires;
     await saveUsersToFile(users);
@@ -1407,13 +1394,15 @@ app.get('/discover', requireAuth, async (req, res) => {
     const passedIds = currentUser.passed || [];
     const excludeIds = new Set([req.userId, ...likedIds, ...passedIds]);
 
-    // Filter potential matches
-    const potentialMatches = users.filter(u => 
-      !excludeIds.has(u.id) && 
-      u.emailVerified && 
-      !u.suspended &&
-      u.id !== req.userId
+    const otherUsers = users.filter(u => String(u.id) !== String(req.userId));
+    const visibleMatches = otherUsers.filter(u =>
+      !excludeIds.has(u.id) &&
+      u.emailVerified !== false &&
+      !u.suspended
     );
+    const potentialMatches = visibleMatches.length > 0
+      ? visibleMatches
+      : otherUsers.filter(u => !excludeIds.has(u.id));
 
     // Shuffle and return top 10
     const shuffled = potentialMatches.sort(() => Math.random() - 0.5).slice(0, 10);

@@ -1,634 +1,157 @@
+const mongoose = require('mongoose');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
-let sqlite3;
-let Pool;
-try {
-  ({ Pool } = require('pg'));
-} catch (_) {
-  // pg may not be installed in local dev until dependencies are updated
-}
-
-const isServerless = Boolean(process.env.VERCEL || process.env.VERCEL_ENV || process.env.NOW_BUILDER);
-const explicitDbMode = process.env.DB_MODE
-  ? process.env.DB_MODE.toLowerCase()
-  : null;
-const hasPostgresConfig = Boolean(
-  Pool && (
-    process.env.DATABASE_URL ||
-    process.env.PGHOST ||
-    process.env.PGUSER ||
-    process.env.PGDATABASE
-  )
-);
-
-const requestedDbMode = explicitDbMode
-  ? explicitDbMode
-  : hasPostgresConfig
-    ? 'postgres'
-    : isServerless
-      ? 'json'
-      : 'sqlite';
-
-const DB_MODE = requestedDbMode === 'sqlite' && isServerless
-  ? 'json'
-  : requestedDbMode;
-
-// Only require sqlite3 if we actually intend to use it. Requiring the native
-// sqlite3 module at top-level causes Vercel serverless functions to attempt
-// loading a binary incompatible with the runtime (GLIBC mismatch).
-if (DB_MODE === 'sqlite') {
-  sqlite3 = require('sqlite3');
-}
-
-const DATA_DIR = isServerless
-  ? path.join(os.tmpdir(), 'best-dating-data')
-  : __dirname;
-const SQLITE_FILE = path.join(DATA_DIR, 'database.sqlite');
-const USERS_FILE = path.join(__dirname, 'users.json');
-const MESSAGES_FILE = path.join(__dirname, 'messages.json');
-const JSON_DB_FILE = path.join(DATA_DIR, 'database.json');
-
-let client = null;
-let jsonStore = null;
-
-function buildPgPlaceholders(count, offset = 1) {
-  return Array.from({ length: count }, (_, idx) => `$${idx + offset}`).join(', ');
-}
-
-function openSqlite() {
-  return new Promise((resolve, reject) => {
-    const db = new sqlite3.Database(SQLITE_FILE, (err) => {
-      if (err) return reject(err);
-      resolve(db);
-    });
-  });
-}
-
-function sqliteRun(db, sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-      if (err) return reject(err);
-      resolve(this);
-    });
-  });
-}
-
-function sqliteAll(db, sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) return reject(err);
-      resolve(rows);
-    });
-  });
-}
-
-async function loadJsonStore() {
+// Ensure root .env is loaded when this module is required directly
+if (!process.env.MONGO_URI) {
   try {
-    const contents = await fs.promises.readFile(JSON_DB_FILE, 'utf8');
-    jsonStore = JSON.parse(contents);
-  } catch (err) {
-    if (err.code === 'ENOENT') {
-      jsonStore = {
-        users: [],
-        messages: [],
-        pending_signups: [],
-        user_likes: [],
-        matches: []
-      };
-      await saveJsonStore();
-    } else {
-      throw err;
-    }
-  }
-  return jsonStore;
+    const dotenv = require('dotenv');
+    const rootEnv = path.join(__dirname, '..', '.env');
+    if (fs.existsSync(rootEnv)) dotenv.config({ path: rootEnv });
+  } catch (e) {}
 }
+const User = require('./models/User');
 
-async function saveJsonStore() {
-  if (!jsonStore) jsonStore = {
-    users: [],
-    messages: [],
-    pending_signups: [],
-    user_likes: [],
-    matches: []
-  };
-  await fs.promises.mkdir(DATA_DIR, { recursive: true });
-  await fs.promises.writeFile(JSON_DB_FILE, JSON.stringify(jsonStore, null, 2), 'utf8');
-}
+const MONGO_URI = process.env.MONGO_URI;
+const DATA_DIR = path.join(__dirname, 'data');
+const PENDING_SIGNUPS_FILE = path.join(DATA_DIR, 'pending_signups.json');
+const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
 
-async function initJson() {
-  await loadJsonStore();
-  return {
-    mode: 'json',
-    query: async () => { throw new Error('JSON mode does not support raw SQL queries'); },
-    run: async () => { throw new Error('JSON mode does not support raw SQL runs'); },
-    transaction: async (fn) => fn({ mode: 'json' })
-  };
-}
+let dbConnected = false;
 
-async function initSqlite() {
-  const db = await openSqlite();
-  const wrapper = {
-    mode: 'sqlite',
-    db,
-    query: (sql, params = []) => sqliteAll(db, sql, params),
-    run: (sql, params = []) => sqliteRun(db, sql, params),
-    transaction: async (fn) => {
-      await sqliteRun(db, 'BEGIN');
-      try {
-        const result = await fn(wrapper);
-        await sqliteRun(db, 'COMMIT');
-        return result;
-      } catch (error) {
-        await sqliteRun(db, 'ROLLBACK');
-        throw error;
-      }
-    }
-  };
-  return wrapper;
-}
-
-async function initPostgres() {
-  if (!Pool) {
-    throw new Error('Postgres support requires installing the pg package.');
-  }
-
-  const config = process.env.DATABASE_URL
-    ? { connectionString: process.env.DATABASE_URL }
-    : {
-      host: process.env.PGHOST,
-      port: process.env.PGPORT ? Number(process.env.PGPORT) : undefined,
-      user: process.env.PGUSER,
-      password: process.env.PGPASSWORD,
-      database: process.env.PGDATABASE,
-      ssl: process.env.PGSSLMODE ? { rejectUnauthorized: process.env.PGSSLMODE !== 'disable' } : undefined,
-    };
-
-  const pool = new Pool(config);
-  await pool.query('SELECT 1');
-
-  return {
-    mode: 'postgres',
-    pool,
-    query: async (sql, params = []) => {
-      const { rows } = await pool.query(sql, params);
-      return rows;
-    },
-    transaction: async (fn) => {
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-        const result = await fn(client);
-        await client.query('COMMIT');
-        return result;
-      } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-      } finally {
-        client.release();
-      }
-    }
-  };
-}
-
-async function ensureTables() {
-  if (!client) throw new Error('DB client is not initialized');
-
-  if (client.mode === 'json') {
-    if (!jsonStore) {
-      await loadJsonStore();
-    }
-    jsonStore.users = Array.isArray(jsonStore.users) ? jsonStore.users : [];
-    jsonStore.messages = Array.isArray(jsonStore.messages) ? jsonStore.messages : [];
-    jsonStore.pending_signups = Array.isArray(jsonStore.pending_signups) ? jsonStore.pending_signups : [];
-    jsonStore.user_likes = Array.isArray(jsonStore.user_likes) ? jsonStore.user_likes : [];
-    jsonStore.matches = Array.isArray(jsonStore.matches) ? jsonStore.matches : [];
-    await saveJsonStore();
-    return;
-  }
-
-  if (client.mode === 'sqlite') {
-    await client.run(`CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      email TEXT UNIQUE,
-      password TEXT,
-      data TEXT NOT NULL,
-      created_at INTEGER
-    )`);
-    await client.run(`CREATE TABLE IF NOT EXISTS messages (
-      id TEXT PRIMARY KEY,
-      data TEXT NOT NULL,
-      created_at INTEGER
-    )`);
-    await client.run(`CREATE TABLE IF NOT EXISTS pending_signups (
-      token TEXT PRIMARY KEY,
-      email TEXT UNIQUE,
-      data TEXT NOT NULL,
-      created_at INTEGER,
-      expires_at INTEGER
-    )`);
-    await client.run(`CREATE TABLE IF NOT EXISTS user_likes (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      liked_user_id TEXT NOT NULL,
-      created_at INTEGER,
-      UNIQUE(user_id, liked_user_id)
-    )`);
-    await client.run(`CREATE TABLE IF NOT EXISTS matches (
-      id TEXT PRIMARY KEY,
-      user1_id TEXT NOT NULL,
-      user2_id TEXT NOT NULL,
-      created_at INTEGER,
-      UNIQUE(user1_id, user2_id)
-    )`);
-  } else {
-    await client.query(`CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      email TEXT UNIQUE,
-      password TEXT,
-      data TEXT NOT NULL,
-      created_at BIGINT
-    )`);
-    await client.query(`CREATE TABLE IF NOT EXISTS messages (
-      id TEXT PRIMARY KEY,
-      data TEXT NOT NULL,
-      created_at BIGINT
-    )`);
-    await client.query(`CREATE TABLE IF NOT EXISTS pending_signups (
-      token TEXT PRIMARY KEY,
-      email TEXT UNIQUE,
-      data TEXT NOT NULL,
-      created_at BIGINT,
-      expires_at BIGINT
-    )`);
-    await client.query(`CREATE TABLE IF NOT EXISTS user_likes (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      liked_user_id TEXT NOT NULL,
-      created_at BIGINT,
-      UNIQUE(user_id, liked_user_id)
-    )`);
-    await client.query(`CREATE TABLE IF NOT EXISTS matches (
-      id TEXT PRIMARY KEY,
-      user1_id TEXT NOT NULL,
-      user2_id TEXT NOT NULL,
-      created_at BIGINT,
-      UNIQUE(user1_id, user2_id)
-    )`);
-  }
-}
-
-function parseRow(row) {
-  if (!row || typeof row.data !== 'string') return null;
-  try {
-    return JSON.parse(row.data);
-  } catch (error) {
-    console.error('Failed to parse DB row JSON', error);
-    return null;
-  }
-}
-
-async function loadUsersFromDb() {
-  if (client.mode === 'json') {
-    return jsonStore.users.map((u) => {
-      const user = typeof u === 'string' ? JSON.parse(u) : u;
-      if (!user) return user;
-      if (!user.password && user.passwordHash) {
-        user.password = user.passwordHash;
-      }
-      return user;
-    }).filter(Boolean);
-  }
-  const rows = await client.query('SELECT data FROM users ORDER BY created_at ASC');
-  const users = rows.map(parseRow).filter(Boolean);
-  // Some older JSON files use `passwordHash` instead of `password`.
-  // Normalize so callers can always use `user.password` for bcrypt checks.
-  return users.map(u => {
-    if (!u) return u;
-    if (!u.password && u.passwordHash) {
-      u.password = u.passwordHash;
-    }
-    return u;
-  });
-}
-
-async function loadPendingSignupsFromDb() {
-  if (client.mode === 'json') {
-    return jsonStore.pending_signups.map((u) => typeof u === 'string' ? JSON.parse(u) : u).filter(Boolean);
-  }
-  const rows = await client.query('SELECT data FROM pending_signups ORDER BY created_at ASC');
-  return rows.map(parseRow).filter(Boolean);
-}
-
-async function loadMessagesFromDb() {
-  if (client.mode === 'json') {
-    return jsonStore.messages.map((m) => typeof m === 'string' ? JSON.parse(m) : m).filter(Boolean);
-  }
-  const rows = await client.query('SELECT data FROM messages ORDER BY created_at ASC');
-  return rows.map(parseRow).filter(Boolean);
-}
-
-async function countTable(table) {
-  if (client.mode === 'json') {
-    if (table === 'users') return jsonStore.users.length;
-    if (table === 'messages') return jsonStore.messages.length;
-    if (table === 'pending_signups') return jsonStore.pending_signups.length;
-    if (table === 'user_likes') return jsonStore.user_likes.length;
-    if (table === 'matches') return jsonStore.matches.length;
-    return 0;
-  }
-  const rows = await client.query(`SELECT COUNT(*) AS count FROM ${table}`);
-  return Number(rows[0]?.count || 0);
-}
-
-async function saveUsersToDb(users) {
-  if (client.mode === 'json') {
-    jsonStore.users = users.map(u => {
-      const user = { ...u };
-      return user;
-    });
-    await saveJsonStore();
-    return;
-  }
-
-  const data = users.map(u => ({
-    id: String(u.id),
-    email: u.email || '',
-    password: u.password || '',
-    json: JSON.stringify(u),
-    created_at: typeof u.created_at === 'number' ? u.created_at : Date.now()
-  }));
-
-  if (client.mode === 'sqlite') {
-    await client.transaction(async (trx) => {
-      const insertSql = 'INSERT OR REPLACE INTO users (id, email, password, data, created_at) VALUES (?, ?, ?, ?, ?)';
-      for (const row of data) {
-        await trx.run(insertSql, [row.id, row.email, row.password, row.json, row.created_at]);
-      }
-      if (data.length > 0) {
-        const placeholders = data.map(() => '?').join(', ');
-        await trx.run(`DELETE FROM users WHERE id NOT IN (${placeholders})`, data.map(r => r.id));
-      } else {
-        await trx.run('DELETE FROM users');
-      }
-    });
-  } else {
-    await client.transaction(async (trx) => {
-      const insertSql = `INSERT INTO users (id, email, password, data, created_at) VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, password = EXCLUDED.password, data = EXCLUDED.data, created_at = EXCLUDED.created_at`;
-      for (const row of data) {
-        await trx.query(insertSql, [row.id, row.email, row.password, row.json, row.created_at]);
-      }
-      if (data.length > 0) {
-        const placeholders = buildPgPlaceholders(data.length);
-        await trx.query(`DELETE FROM users WHERE id NOT IN (${placeholders})`, data.map(r => r.id));
-      } else {
-        await trx.query('DELETE FROM users');
-      }
-    });
-  }
-}
-
-async function savePendingSignupsToDb(signups) {
-  if (client.mode === 'json') {
-    jsonStore.pending_signups = signups.map(u => ({
-      ...u
-    }));
-    await saveJsonStore();
-    return;
-  }
-
-  const data = signups.map(u => ({
-    token: String(u.token),
-    email: u.email || '',
-    json: JSON.stringify(u),
-    created_at: typeof u.created_at === 'number' ? u.created_at : Date.now(),
-    expires_at: typeof u.expires_at === 'number' ? u.expires_at : Date.now() + 3600 * 1000
-  }));
-
-  if (client.mode === 'sqlite') {
-    await client.transaction(async (trx) => {
-      const insertSql = 'INSERT OR REPLACE INTO pending_signups (token, email, data, created_at, expires_at) VALUES (?, ?, ?, ?, ?)';
-      for (const row of data) {
-        await trx.run(insertSql, [row.token, row.email, row.json, row.created_at, row.expires_at]);
-      }
-      if (data.length > 0) {
-        const placeholders = data.map(() => '?').join(', ');
-        await trx.run(`DELETE FROM pending_signups WHERE token NOT IN (${placeholders})`, data.map(r => r.token));
-      } else {
-        await trx.run('DELETE FROM pending_signups');
-      }
-    });
-  } else {
-    await client.transaction(async (trx) => {
-      const insertSql = `INSERT INTO pending_signups (token, email, data, created_at, expires_at) VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (token) DO UPDATE SET email = EXCLUDED.email, data = EXCLUDED.data, created_at = EXCLUDED.created_at, expires_at = EXCLUDED.expires_at`;
-      for (const row of data) {
-        await trx.query(insertSql, [row.token, row.email, row.json, row.created_at, row.expires_at]);
-      }
-      if (data.length > 0) {
-        const placeholders = buildPgPlaceholders(data.length);
-        await trx.query(`DELETE FROM pending_signups WHERE token NOT IN (${placeholders})`, data.map(r => r.token));
-      } else {
-        await trx.query('DELETE FROM pending_signups');
-      }
-    });
-  }
-}
-
-async function saveMessagesToDb(messages) {
-  if (client.mode === 'json') {
-    jsonStore.messages = messages.map(m => ({ ...m }));
-    await saveJsonStore();
-    return;
-  }
-
-  const data = messages.map(m => ({
-    id: String(m.id),
-    json: JSON.stringify(m),
-    created_at: typeof m.created_at === 'number' ? m.created_at : Date.now()
-  }));
-
-  if (client.mode === 'sqlite') {
-    await client.transaction(async (trx) => {
-      const insertSql = 'INSERT OR REPLACE INTO messages (id, data, created_at) VALUES (?, ?, ?)';
-      for (const row of data) {
-        await trx.run(insertSql, [row.id, row.json, row.created_at]);
-      }
-      if (data.length > 0) {
-        const placeholders = data.map(() => '?').join(', ');
-        await trx.run(`DELETE FROM messages WHERE id NOT IN (${placeholders})`, data.map(r => r.id));
-      } else {
-        await trx.run('DELETE FROM messages');
-      }
-    });
-  } else {
-    await client.transaction(async (trx) => {
-      const insertSql = `INSERT INTO messages (id, data, created_at) VALUES ($1, $2, $3)
-        ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, created_at = EXCLUDED.created_at`;
-      for (const row of data) {
-        await trx.query(insertSql, [row.id, row.json, row.created_at]);
-      }
-      if (data.length > 0) {
-        const placeholders = buildPgPlaceholders(data.length);
-        await trx.query(`DELETE FROM messages WHERE id NOT IN (${placeholders})`, data.map(r => r.id));
-      } else {
-        await trx.query('DELETE FROM messages');
-      }
-    });
-  }
-}
-
-async function seedFromJsonIfNeeded() {
-  const userCount = await countTable('users');
-  if (userCount === 0 && fs.existsSync(USERS_FILE)) {
-    try {
-      const raw = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
-      if (Array.isArray(raw)) {
-        await saveUsersToDb(raw);
-      }
-    } catch (error) {
-      console.warn('Failed to seed users from JSON file', error);
-    }
-  }
-
-  const messageCount = await countTable('messages');
-  if (messageCount === 0 && fs.existsSync(MESSAGES_FILE)) {
-    try {
-      const raw = JSON.parse(fs.readFileSync(MESSAGES_FILE, 'utf8'));
-      if (Array.isArray(raw)) {
-        await saveMessagesToDb(raw);
-      }
-    } catch (error) {
-      console.warn('Failed to seed messages from JSON file', error);
-    }
-  }
-}
-
-async function addLike(userId, likedUserId) {
-  if (client.mode === 'json') {
-    const exists = jsonStore.user_likes.some(l => l.user_id === userId && l.liked_user_id === likedUserId);
-    if (!exists) {
-      jsonStore.user_likes.push({
-        id: `${userId}_${likedUserId}_${Date.now()}`,
-        user_id: userId,
-        liked_user_id: likedUserId,
-        created_at: Date.now()
-      });
-      await saveJsonStore();
-    }
-    return;
-  }
-  const id = `${userId}_${likedUserId}_${Date.now()}`;
-  if (client.mode === 'sqlite') {
-    await client.query(
-      'INSERT INTO user_likes (id, user_id, liked_user_id, created_at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
-      [id, userId, likedUserId, Date.now()]);
-  }
-}
-
-async function hasUserLiked(userId, likedUserId) {
-  if (client.mode === 'json') {
-    return jsonStore.user_likes.some(l => l.user_id === userId && l.liked_user_id === likedUserId);
-  }
-  const likes = await client.query(
-    client.mode === 'sqlite' 
-      ? 'SELECT id FROM user_likes WHERE user_id = ? AND liked_user_id = ?' 
-      : 'SELECT id FROM user_likes WHERE user_id = $1 AND liked_user_id = $2',
-    client.mode === 'sqlite' ? [userId, likedUserId] : [userId, likedUserId]
-  );
-  return likes.length > 0;
-}
-
-async function createMatch(userId1, userId2) {
-  if (client.mode === 'json') {
-    const exists = jsonStore.matches.some(m =>
-      (m.user1_id === userId1 && m.user2_id === userId2) ||
-      (m.user1_id === userId2 && m.user2_id === userId1)
-    );
-    if (!exists) {
-      jsonStore.matches.push({
-        id: `match_${Math.min(userId1, userId2)}_${Math.max(userId1, userId2)}_${Date.now()}`,
-        user1_id: userId1,
-        user2_id: userId2,
-        created_at: Date.now()
-      });
-      await saveJsonStore();
-    }
-    return;
-  }
-  const id = `match_${Math.min(userId1, userId2)}_${Math.max(userId1, userId2)}_${Date.now()}`;
-  const user1_id = userId1;
-  const user2_id = userId2;
-  
-  if (client.mode === 'sqlite') {
-    await client.run('INSERT OR REPLACE INTO matches (id, user1_id, user2_id, created_at) VALUES (?, ?, ?, ?)',
-      [id, user1_id, user2_id, Date.now()]);
-  } else {
-    await client.query(
-      'INSERT INTO matches (id, user1_id, user2_id, created_at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
-      [id, user1_id, user2_id, Date.now()]);
-  }
-}
-
-async function getMatches(userId) {
-  if (client.mode === 'json') {
-    return jsonStore.matches.filter(m => m.user1_id === userId || m.user2_id === userId);
-  }
-  const matches = await client.query(
-    client.mode === 'sqlite'
-      ? 'SELECT * FROM matches WHERE user1_id = ? OR user2_id = ?'
-      : 'SELECT * FROM matches WHERE user1_id = $1 OR user2_id = $2',
-    client.mode === 'sqlite' ? [userId, userId] : [userId, userId]
-  );
-  return matches;
-}
-
-async function isMatched(userId1, userId2) {
-  if (client.mode === 'json') {
-    return jsonStore.matches.some(m =>
-      (m.user1_id === userId1 && m.user2_id === userId2) ||
-      (m.user1_id === userId2 && m.user2_id === userId1)
-    );
-  }
-  const matches = await client.query(
-    client.mode === 'sqlite'
-      ? 'SELECT id FROM matches WHERE (user1_id = ? AND user2_id = ?) OR (user1_id = ? AND user2_id = ?)'
-      : 'SELECT id FROM matches WHERE (user1_id = $1 AND user2_id = $2) OR (user1_id = $3 AND user2_id = $4)',
-    client.mode === 'sqlite' 
-      ? [userId1, userId2, userId2, userId1] 
-      : [userId1, userId2, userId2, userId1]
-  );
-  return matches.length > 0;
+function normalizeEmail(email) {
+  return typeof email === 'string' ? email.trim().toLowerCase() : '';
 }
 
 async function initDb() {
-  if (client) return;
+  if (dbConnected) return;
+  if (!MONGO_URI) {
+    throw new Error('MONGO_URI is required for MongoDB persistence.');
+  }
+  await mongoose.connect(MONGO_URI, {
+    tls: true,
+    ssl: true,
+    connectTimeoutMS: 10000,
+    serverSelectionTimeoutMS: 10000,
+  });
+  dbConnected = true;
+  console.log('Mongo Connected');
+}
 
-  if (DB_MODE === 'postgres') {
-    client = await initPostgres();
-  } else if (DB_MODE === 'sqlite') {
-    client = await initSqlite();
-  } else {
-    client = await initJson();
+mongoose.connection.on('error', (err) => {
+  console.error('Mongo connection error:', err);
+});
+
+function normalizeUserRecord(user) {
+  if (!user) return null;
+  const normalized = {
+    ...user,
+    id: user._id ? String(user._id) : String(user.id || ''),
+    password: user.password || user.passwordHash || '',
+    photo: user.photo || user.photoUrl || '',
+    emailVerified: user.emailVerified !== undefined ? user.emailVerified : user.isVerified || false,
+  };
+  delete normalized._id;
+  delete normalized.__v;
+  return normalized;
+}
+
+async function loadJsonFile(filePath, fallback) {
+  try {
+    const contents = await fs.promises.readFile(filePath, 'utf8');
+    return JSON.parse(contents);
+  } catch (err) {
+    if (err.code === 'ENOENT') return fallback;
+    throw err;
+  }
+}
+
+async function saveJsonFile(filePath, data) {
+  await fs.promises.mkdir(DATA_DIR, { recursive: true });
+  await fs.promises.writeFile(filePath, JSON.stringify(data, null, 2), 'utf8');
+}
+
+async function loadUsersFromDb() {
+  await initDb();
+  const users = await User.find().lean();
+  return users.map(normalizeUserRecord);
+}
+
+async function saveUsersToDb(users) {
+  await initDb();
+  const normalizedUsers = Array.isArray(users) ? users.filter(Boolean) : [];
+  const ids = [];
+
+  for (const user of normalizedUsers) {
+    const id = String(user.id || user._id || user.email || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    const update = {
+      name: user.name || '',
+      email: normalizeEmail(user.email),
+      passwordHash: user.passwordHash || user.password || '',
+      photoUrl: user.photoUrl || user.photo || '',
+      isVerified: user.isVerified !== undefined ? user.isVerified : Boolean(user.emailVerified),
+      authToken: user.authToken,
+      authTokenExpires: user.authTokenExpires,
+      sessionVersion: typeof user.sessionVersion === 'number' ? user.sessionVersion : Number(user.sessionVersion || 0),
+      emailVerificationToken: user.emailVerificationToken,
+      passwordResetToken: user.passwordResetToken,
+      passwordResetExpires: user.passwordResetExpires,
+      suspended: !!user.suspended,
+      dob: user.dob || '',
+      gender: user.gender || '',
+      country: user.country || '',
+      state: user.state || '',
+      bio: user.bio || '',
+      interests: Array.isArray(user.interests) ? user.interests : [],
+      lookingFor: user.lookingFor || 'Any',
+      likes: Array.isArray(user.likes) ? user.likes : [],
+      messages: Array.isArray(user.messages) ? user.messages : [],
+      gallery: Array.isArray(user.gallery) ? user.gallery : [],
+      notifications: Array.isArray(user.notifications) ? user.notifications : [],
+      matches: Array.isArray(user.matches) ? user.matches : [],
+      passed: Array.isArray(user.passed) ? user.passed : [],
+      updatedAt: user.updatedAt || Date.now(),
+      createdAt: user.createdAt || Date.now(),
+    };
+
+    const doc = await User.findOneAndUpdate(
+      { _id: id },
+      { $set: update },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).lean();
+
+    ids.push(String(doc._id));
   }
 
-  await ensureTables();
-  await seedFromJsonIfNeeded();
+  if (ids.length === 0) {
+    await User.deleteMany({});
+  } else {
+    await User.deleteMany({ _id: { $nin: ids } });
+  }
+}
+
+async function loadPendingSignupsFromDb() {
+  return loadJsonFile(PENDING_SIGNUPS_FILE, []);
+}
+
+async function savePendingSignupsToDb(signups) {
+  return saveJsonFile(PENDING_SIGNUPS_FILE, Array.isArray(signups) ? signups : []);
+}
+
+async function loadMessagesFromDb() {
+  return loadJsonFile(MESSAGES_FILE, []);
+}
+
+async function saveMessagesToDb(messages) {
+  return saveJsonFile(MESSAGES_FILE, Array.isArray(messages) ? messages : []);
 }
 
 module.exports = {
-  DB_MODE,
+  DB_MODE: 'mongodb',
   initDb,
   loadUsersFromDb,
-  loadPendingSignupsFromDb,
-  loadMessagesFromDb,
   saveUsersToDb,
+  loadPendingSignupsFromDb,
   savePendingSignupsToDb,
+  loadMessagesFromDb,
   saveMessagesToDb,
-  addLike,
-  hasUserLiked,
-  createMatch,
-  getMatches,
-  isMatched,
 };

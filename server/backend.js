@@ -42,13 +42,8 @@ const io = socketIo(server, {
 const PORT = Number(process.env.PORT || 3001);
 const JWT_SECRET = process.env.JWT_SECRET || 'sparkdating_jwt_secret';
 const INACTIVITY_TIMEOUT_MS = Number(process.env.INACTIVITY_TIMEOUT_MS) || 20 * 60 * 1000; // 20 minutes
-// Use the canonical data files in the server folder to avoid multiple user stores
-const DATA_DIR = path.join(__dirname); // keep for compatibility
-// Use a writable temp dir when running as a serverless function (e.g. Vercel)
 const UPLOADS_DIR = process.env.VERCEL ? path.join(os.tmpdir(), 'uploads') : path.join(__dirname, 'uploads');
 const CLIENT_DIST_DIR = path.join(__dirname, '../client/dist');
-const USERS_FILE = path.join(__dirname, 'users.json');
-const MESSAGES_FILE = path.join(__dirname, 'messages.json');
 
 // Always use memory storage to avoid invoking multer.diskStorage() at module
 // load time in serverless environments where the function bundle is read-only.
