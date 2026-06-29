@@ -10,6 +10,7 @@ if (!process.env.MONGO_URI) {
   } catch (e) {}
 }
 const User = require('./models/User');
+console.log('DB using User _id type:', User.schema.paths._id.instance, 'opts:', User.schema.paths._id.options);
 
 const MONGO_URI = process.env.MONGO_URI;
 const DATA_DIR = path.join(__dirname, 'data');
@@ -48,7 +49,7 @@ function normalizeUserRecord(user) {
     id: user._id ? String(user._id) : String(user.id || ''),
     password: user.password || user.passwordHash || '',
     photo: user.photo || user.photoUrl || '',
-    emailVerified: user.emailVerified !== undefined ? user.emailVerified : user.isVerified || false,
+    emailVerified: user.emailVerified !== undefined ? user.emailVerified : (user.isVerified !== undefined ? user.isVerified : undefined),
   };
   delete normalized._id;
   delete normalized.__v;
@@ -88,7 +89,9 @@ async function saveUsersToDb(users) {
       email: normalizeEmail(user.email),
       passwordHash: user.passwordHash || user.password || '',
       photoUrl: user.photoUrl || user.photo || '',
-      isVerified: user.isVerified !== undefined ? user.isVerified : Boolean(user.emailVerified),
+      ...(user.isVerified !== undefined || user.emailVerified !== undefined ? {
+        isVerified: user.isVerified !== undefined ? user.isVerified : Boolean(user.emailVerified)
+      } : {}),
       authToken: user.authToken,
       authTokenExpires: user.authTokenExpires,
       sessionVersion: typeof user.sessionVersion === 'number' ? user.sessionVersion : Number(user.sessionVersion || 0),

@@ -293,6 +293,7 @@ function cleanUserForClient(user) {
   if (!user) return null;
   const {
     password,
+    passwordHash,
     emailVerificationToken,
     passwordResetToken,
     passwordResetExpires,
@@ -511,8 +512,7 @@ app.post('/login', async (req, res) => {
     }
 
     const normalizedEmail = normalizeEmail(email);
-    const users = await loadUsersFromFile();
-    const user = users.find(u => normalizeEmail(u.email) === normalizedEmail);
+    const user = await User.findOne({ email: normalizedEmail }).lean();
 
     if (!user) {
       const pendingSignups = await loadPendingSignupsFromFile();
@@ -529,17 +529,25 @@ app.post('/login', async (req, res) => {
       return res.json({ success: false, message: 'Please verify your email before logging in.' });
     }
 
-    const match = await bcrypt.compare(password, user.password);
+    const match = await bcrypt.compare(password, user.passwordHash || user.password || '');
     if (!match) {
       return res.json({ success: false, message: 'Wrong password' });
     }
 
-    user.sessionVersion = Number(user.sessionVersion || 0) + 1;
-    user.authToken = generateToken();
-    user.authTokenExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
-    await saveUsersToFile(users);
+    const sessionVersion = Number(user.sessionVersion || 0) + 1;
+    const authToken = generateToken();
+    const authTokenExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+    const updatedUser = await User.findOneAndUpdate(
+      { _id: user._id },
+      { $set: { sessionVersion, authToken, authTokenExpires } },
+      { new: true, lean: true }
+    ).lean();
 
-    res.cookie('authToken', user.authToken, {
+    if (!updatedUser) {
+      return res.status(500).json({ success: false, message: 'Unable to update login session' });
+    }
+
+    res.cookie('authToken', updatedUser.authToken, {
       httpOnly: true,
       sameSite: 'strict',
       secure: process.env.NODE_ENV === 'production',
@@ -547,8 +555,8 @@ app.post('/login', async (req, res) => {
       path: '/'
     });
 
-    const jwtToken = jwt.sign({ id: user.id, email: user.email, sessionVersion: user.sessionVersion }, JWT_SECRET, { expiresIn: '24h' });
-    res.json({ success: true, user: cleanUserForClient(user), token: jwtToken });
+    const jwtToken = jwt.sign({ id: String(updatedUser._id), email: updatedUser.email, sessionVersion: updatedUser.sessionVersion }, JWT_SECRET, { expiresIn: '24h' });
+    res.json({ success: true, user: cleanUserForClient(updatedUser), token: jwtToken });
   } catch (err) {
     console.error('LOGIN ERROR:', err);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -660,7 +668,7 @@ app.get('/users', requireAuth, async (req, res) => {
     ? usersWithoutCurrent
     : users.filter(u => String(u.id) !== String(currentUser.id));
 
-  const usersNoPassword = usersForDisplay.map(({ password, ...u }) => u);
+  const usersNoPassword = usersForDisplay.map(({ password, passwordHash, ...u }) => u);
 
   // convert bios to first person for front-end display
   function escapeRegExp(string) {

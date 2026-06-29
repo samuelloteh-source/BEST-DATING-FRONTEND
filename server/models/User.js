@@ -7,6 +7,6 @@ const userSchema = new mongoose.Schema({
   passwordHash: String,
   photoUrl: String,
   createdAt: { type: Date, default: Date.now }
-});
+}, { strict: false });
 
 module.exports = mongoose.models.User || mongoose.model('User', userSchema);
