@@ -18,6 +18,7 @@ const PENDING_SIGNUPS_FILE = path.join(DATA_DIR, 'pending_signups.json');
 const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
 
 let dbConnected = false;
+const useMongo = Boolean(MONGO_URI);
 
 function normalizeEmail(email) {
   return typeof email === 'string' ? email.trim().toLowerCase() : '';
@@ -25,9 +26,15 @@ function normalizeEmail(email) {
 
 async function initDb() {
   if (dbConnected) return;
-  if (!MONGO_URI) {
-    throw new Error('MONGO_URI is required for MongoDB persistence.');
+  if (!useMongo) {
+    // Ensure data directory exists for file-based storage
+    await fs.promises.mkdir(DATA_DIR, { recursive: true });
+    dbConnected = true;
+    console.log('DB using file-based storage at', DATA_DIR);
+    return;
   }
+
+  // Connect to MongoDB when MONGO_URI is provided
   await mongoose.connect(MONGO_URI, {
     tls: true,
     ssl: true,
@@ -73,6 +80,18 @@ async function saveJsonFile(filePath, data) {
 
 async function loadUsersFromDb() {
   await initDb();
+  if (!useMongo) {
+    const usersFile = path.join(DATA_DIR, 'users.json');
+    try {
+      const contents = await fs.promises.readFile(usersFile, 'utf8');
+      const users = JSON.parse(contents);
+      return Array.isArray(users) ? users.map(normalizeUserRecord) : [];
+    } catch (err) {
+      if (err.code === 'ENOENT') return [];
+      throw err;
+    }
+  }
+
   const users = await User.find().lean();
   return users.map(normalizeUserRecord);
 }
@@ -80,8 +99,14 @@ async function loadUsersFromDb() {
 async function saveUsersToDb(users) {
   await initDb();
   const normalizedUsers = Array.isArray(users) ? users.filter(Boolean) : [];
-  const ids = [];
+  if (!useMongo) {
+    const usersFile = path.join(DATA_DIR, 'users.json');
+    await fs.promises.mkdir(DATA_DIR, { recursive: true });
+    await fs.promises.writeFile(usersFile, JSON.stringify(normalizedUsers, null, 2), 'utf8');
+    return;
+  }
 
+  const ids = [];
   for (const user of normalizedUsers) {
     const id = String(user.id || user._id || user.email || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     const update = {

@@ -1045,4 +1045,12 @@ try {
   console.warn('Static client serving not enabled:', err.message || err);
 }
 
-module.exports = app;
+// Export a Vercel-compatible handler when running as a serverless function.
+// @vercel/node can invoke the exported function for each request.
+if (process.env.VERCEL) {
+  module.exports = function vercelHandler(req, res) {
+    return app(req, res);
+  };
+} else {
+  module.exports = app;
+}
