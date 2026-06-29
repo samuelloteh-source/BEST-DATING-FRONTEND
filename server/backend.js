@@ -947,7 +947,13 @@ app.delete('/api/user/account', authMiddleware, async (req, res) => {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ success: true, status: 'ok' });
+  console.log('Health check requested');
+  try {
+    res.json({ success: true, status: 'ok' });
+  } catch (err) {
+    console.error('Health endpoint error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Seeded user status endpoint
