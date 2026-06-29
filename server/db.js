@@ -13,9 +13,13 @@ const User = require('./models/User');
 console.log('DB using User _id type:', User.schema.paths._id.instance, 'opts:', User.schema.paths._id.options);
 
 const MONGO_URI = process.env.MONGO_URI;
-const DATA_DIR = path.join(__dirname, 'data');
+const REPO_DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = process.env.VERCEL
+  ? path.join(require('os').tmpdir(), 'best-dating-data')
+  : REPO_DATA_DIR;
 const PENDING_SIGNUPS_FILE = path.join(DATA_DIR, 'pending_signups.json');
 const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
+const REPO_USERS_FILE = path.join(REPO_DATA_DIR, 'users.json');
 
 let dbConnected = false;
 const useMongo = Boolean(MONGO_URI);
@@ -27,8 +31,19 @@ function normalizeEmail(email) {
 async function initDb() {
   if (dbConnected) return;
   if (!useMongo) {
-    // Ensure data directory exists for file-based storage
+    // Ensure writable temp storage exists for file-based storage in serverless environments
     await fs.promises.mkdir(DATA_DIR, { recursive: true });
+    if (process.env.VERCEL) {
+      try {
+        const targetUsersFile = path.join(DATA_DIR, 'users.json');
+        if (!fs.existsSync(targetUsersFile) && fs.existsSync(REPO_USERS_FILE)) {
+          await fs.promises.copyFile(REPO_USERS_FILE, targetUsersFile);
+          console.log('Copied seeded users file to writable temp storage');
+        }
+      } catch (copyErr) {
+        console.warn('Unable to copy seeded data to temp storage:', copyErr.message || copyErr);
+      }
+    }
     dbConnected = true;
     console.log('DB using file-based storage at', DATA_DIR);
     return;
