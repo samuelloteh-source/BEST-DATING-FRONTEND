@@ -494,8 +494,17 @@ function App() {
 
       const res = await axios.post('/signup', formData, { timeout: 60000 })
       if (res.data?.success) {
-        setMessage('Signup complete! Please log in.')
-        setView('login')
+        if (res.data?.token) {
+          localStorage.setItem('authToken', res.data.token)
+          axios.defaults.headers.common['Authorization'] = `Bearer ${res.data.token}`
+          setAuthToken(res.data.token)
+        }
+        if (res.data?.user) {
+          setUser(res.data.user)
+        }
+        setMessage('Signup complete! Welcome to the app.')
+        setView('app')
+        window.history.pushState({}, '', '/app/discover')
         localStorage.removeItem('signupStep')
         setStep(1)
         setSignup({ firstName:'', lastName:'', email:'', password:'', dob:'', country:'', stateRegion:'', gender:'', lookingFor:'', interests:[], bio:'', profileFiles: [], selfieFile: null })

@@ -662,7 +662,7 @@ app.get('/users', requireAuth, async (req, res) => {
   const currentUser = req.user;
   const users = await loadUsersFromFile();
 
-  const visibleUsers = users.filter(u => !u.suspended && u.emailVerified !== false);
+  const visibleUsers = users.filter(u => !u.suspended);
   const usersWithoutCurrent = visibleUsers.filter(u => String(u.id) !== String(currentUser.id));
   const usersForDisplay = usersWithoutCurrent.length > 0
     ? usersWithoutCurrent
@@ -1405,7 +1405,6 @@ app.get('/discover', requireAuth, async (req, res) => {
     const otherUsers = users.filter(u => String(u.id) !== String(req.userId));
     const visibleMatches = otherUsers.filter(u =>
       !excludeIds.has(u.id) &&
-      u.emailVerified !== false &&
       !u.suspended
     );
     const potentialMatches = visibleMatches.length > 0

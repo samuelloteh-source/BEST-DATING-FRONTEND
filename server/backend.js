@@ -93,6 +93,7 @@ function cleanUserForClient(user) {
 
   const cleaned = {
     ...safe,
+    id: String(safe.id || safe._id || ''),
     email: normalizeEmail(safe.email),
     photo: normalizePhotoUrl(safe.photo || ''),
     avatar: normalizePhotoUrl(safe.avatar || safe.photo || ''),
@@ -365,14 +366,17 @@ app.post('/signup', upload.array('photos', 10), async (req, res) => {
       matches: [],
       notifications: [],
       emailVerified: true,
+      suspended: false,
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      lastActivity: Date.now(),
     };
 
     users.push(newUser);
     await saveUsers(users);
 
-    return res.json({ success: true, message: 'Signup complete. You may now log in.' });
+    const token = jwt.sign({ id: String(newUser.id), email: normalizedEmail }, JWT_SECRET, { expiresIn: '24h' });
+    return res.json({ success: true, message: 'Signup complete.', user: cleanUserForClient(newUser), token });
   } catch (err) {
     console.error('Signup error:', err);
     return res.status(500).json({ success: false, message: 'Unable to create account.' });
@@ -469,7 +473,7 @@ app.get('/discover', authMiddleware, async (req, res) => {
   const excluded = new Set([currentUser.id, ...(currentUser.passed || []), ...(currentUser.likes || []), ...(currentUser.matches || [])]);
   const candidates = users
     .filter(u => {
-      if (excluded.has(u.id) || u.emailVerified === false) return false;
+      if (excluded.has(u.id)) return false;
       // Filter out offline seeded users
       if (u.id && u.id.startsWith('seed_') && !scheduler.isSeededUserOnline(u.id)) return false;
       return true;
