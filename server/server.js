@@ -22,6 +22,9 @@ if (envPath) {
   dotenv.config();
 }
 
+console.log("MONGO_URI exists:", !!process.env.MONGO_URI);
+console.log("MONGO_URI value:", process.env.MONGO_URI);
+
 const db = require('./db');
 const User = require('./models/User');
 
