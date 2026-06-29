@@ -32,13 +32,34 @@ const app = express();
 const cors = require('cors'); 
 app.use(cors());
 app.use(express.json()); // 
-const server = http.createServer(app);
-const io = socketIo(server, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST']
-  }
-});
+let server = null;
+let io = null;
+
+function setupSocketHandlers(ioInstance) {
+  ioInstance.on('connection', (socket) => {
+    console.log(`User connected: ${socket.id}`);
+
+    socket.on('disconnect', () => {
+      console.log(`User disconnected: ${socket.id}`);
+    });
+
+    socket.on('request_status_check', async () => {
+      try {
+        const users = await loadUsers();
+        const statuses = users
+          .filter(u => u.id && u.id.startsWith('seed_'))
+          .map(u => ({
+            userId: u.id,
+            isOnline: scheduler.isSeededUserOnline(u.id),
+            name: u.name
+          }));
+        socket.emit('status_check_response', statuses);
+      } catch (err) {
+        console.error('Error in status check:', err);
+      }
+    });
+  });
+}
 const PORT = Number(process.env.PORT || 3001);
 const JWT_SECRET = process.env.JWT_SECRET || 'sparkdating_jwt_secret';
 const INACTIVITY_TIMEOUT_MS = Number(process.env.INACTIVITY_TIMEOUT_MS) || 20 * 60 * 1000; // 20 minutes
@@ -921,30 +942,7 @@ app.delete('/api/user/account', authMiddleware, async (req, res) => {
   }
 });
 
-// Socket.io connection handling
-io.on('connection', (socket) => {
-  console.log(`User connected: ${socket.id}`);
-
-  socket.on('disconnect', () => {
-    console.log(`User disconnected: ${socket.id}`);
-  });
-
-  socket.on('request_status_check', async () => {
-    try {
-      const users = await loadUsers();
-      const statuses = users
-        .filter(u => u.id && u.id.startsWith('seed_'))
-        .map(u => ({
-          userId: u.id,
-          isOnline: scheduler.isSeededUserOnline(u.id),
-          name: u.name
-        }));
-      socket.emit('status_check_response', statuses);
-    } catch (err) {
-      console.error('Error in status check:', err);
-    }
-  });
-});
+// Socket.io handlers are registered when the server starts in `start()`
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -989,6 +987,16 @@ async function start() {
   await db.initDb();
   await loadFaceApiModels();
   
+  // Create HTTP server and socket.io only when starting the server (not on module import for serverless)
+  server = http.createServer(app);
+  io = socketIo(server, {
+    cors: {
+      origin: '*',
+      methods: ['GET', 'POST']
+    }
+  });
+  setupSocketHandlers(io);
+
   // Initialize seeded user scheduler on startup
   const users = await loadUsers();
   scheduler.setIoInstance(io);
