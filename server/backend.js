@@ -63,6 +63,7 @@ function setupSocketHandlers(ioInstance) {
 const PORT = Number(process.env.PORT || 3001);
 const JWT_SECRET = process.env.JWT_SECRET || 'sparkdating_jwt_secret';
 const INACTIVITY_TIMEOUT_MS = Number(process.env.INACTIVITY_TIMEOUT_MS) || 20 * 60 * 1000; // 20 minutes
+const DATA_DIR = path.join(__dirname, 'data');
 const UPLOADS_DIR = process.env.VERCEL ? path.join(os.tmpdir(), 'uploads') : path.join(__dirname, 'uploads');
 const CLIENT_DIST_DIR = path.join(__dirname, '../client/dist');
 
