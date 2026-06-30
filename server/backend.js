@@ -946,13 +946,14 @@ app.delete('/api/user/account', authMiddleware, async (req, res) => {
 // Socket.io handlers are registered when the server starts in `start()`
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get(['/health', '/api/health'], (req, res) => {
   console.log('Health check requested');
   try {
-    res.json({ success: true, status: 'ok' });
+    res.set('Content-Type', 'application/json');
+    res.json({ success: true, status: 'ok', service: 'spark-backend' });
   } catch (err) {
     console.error('Health endpoint error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

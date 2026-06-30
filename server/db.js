@@ -78,6 +78,42 @@ function normalizeUserRecord(user) {
   return normalized;
 }
 
+function getUserIdentity(user) {
+  if (!user) return '';
+  const id = String(user.id || user._id || '').trim();
+  if (id) return id;
+  return normalizeEmail(user.email || '');
+}
+
+async function ensureRepoSeedUsers(users) {
+  const currentUsers = Array.isArray(users) ? users.filter(Boolean).map(normalizeUserRecord) : [];
+  const repoUsers = await loadJsonFile(REPO_USERS_FILE, []);
+  const repoSeedUsers = Array.isArray(repoUsers) ? repoUsers.filter(Boolean).map(normalizeUserRecord) : [];
+
+  if (!repoSeedUsers.length) {
+    return currentUsers;
+  }
+
+  const mergedUsers = [];
+  const seen = new Set();
+
+  for (const user of currentUsers) {
+    const identity = getUserIdentity(user);
+    if (!identity || seen.has(identity)) continue;
+    seen.add(identity);
+    mergedUsers.push(user);
+  }
+
+  for (const user of repoSeedUsers) {
+    const identity = getUserIdentity(user);
+    if (!identity || seen.has(identity)) continue;
+    seen.add(identity);
+    mergedUsers.push(user);
+  }
+
+  return mergedUsers;
+}
+
 async function loadJsonFile(filePath, fallback) {
   try {
     const contents = await fs.promises.readFile(filePath, 'utf8');
@@ -100,7 +136,8 @@ async function loadUsersFromDb() {
     try {
       const contents = await fs.promises.readFile(usersFile, 'utf8');
       const users = JSON.parse(contents);
-      return Array.isArray(users) ? users.map(normalizeUserRecord) : [];
+      const normalizedUsers = Array.isArray(users) ? users.map(normalizeUserRecord) : [];
+      return await ensureRepoSeedUsers(normalizedUsers);
     } catch (err) {
       if (err.code === 'ENOENT') return [];
       throw err;
@@ -113,11 +150,12 @@ async function loadUsersFromDb() {
 
 async function saveUsersToDb(users) {
   await initDb();
-  const normalizedUsers = Array.isArray(users) ? users.filter(Boolean) : [];
+  const normalizedUsers = Array.isArray(users) ? users.filter(Boolean).map(normalizeUserRecord) : [];
   if (!useMongo) {
     const usersFile = path.join(DATA_DIR, 'users.json');
+    const mergedUsers = await ensureRepoSeedUsers(normalizedUsers);
     await fs.promises.mkdir(DATA_DIR, { recursive: true });
-    await fs.promises.writeFile(usersFile, JSON.stringify(normalizedUsers, null, 2), 'utf8');
+    await fs.promises.writeFile(usersFile, JSON.stringify(mergedUsers, null, 2), 'utf8');
     return;
   }
 
