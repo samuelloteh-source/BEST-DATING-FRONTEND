@@ -627,7 +627,7 @@ app.post('/resend-verification', async (req, res) => {
       }
       await saveUsersToFile(users);
       const emailResult = await sendVerificationEmail(user, user.emailVerificationToken);
-      return res.json({ success: true, message: 'Verification email resent. Check your inbox.', previewUrl: emailResult?.previewUrl || null });
+      return res.json({ success: true, message: 'Verification email resent. Check your inbox and spam folder.', previewUrl: emailResult?.previewUrl || null });
     }
 
     // pending signup exists
@@ -636,7 +636,7 @@ app.post('/resend-verification', async (req, res) => {
     pending.expires_at = Date.now() + 3600 * 1000;
     await savePendingSignupsToFile(pendingSignups);
     const emailResult = await sendVerificationEmail(pending, token);
-    return res.json({ success: true, message: 'Verification email resent. Check your inbox.', previewUrl: emailResult?.previewUrl || null });
+    return res.json({ success: true, message: 'Verification email resent. Check your inbox and spam folder.', previewUrl: emailResult?.previewUrl || null });
   } catch (err) {
     console.error('Resend verification error:', err);
     res.status(500).json({ success: false, message: 'Unable to resend verification email.' });

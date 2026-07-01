@@ -27,6 +27,7 @@ try {
 
 const scheduler = require('./seeded-user-scheduler');
 const db = require('./db');
+const { sendMail } = require('./mailer');
 
 const app = express();
 const cors = require('cors'); 
@@ -163,6 +164,16 @@ async function loadUsers() {
   await db.initDb();
   const users = await db.loadUsersFromDb();
   return Array.isArray(users) ? users.map((u) => ({ ...u, id: String(u.id || u._id || ''), email: normalizeEmail(u.email) })) : [];
+}
+
+function getPublicBaseUrl() {
+  if (process.env.PUBLIC_BASE_URL) {
+    return process.env.PUBLIC_BASE_URL.replace(/\/$/, '')
+  }
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL.replace(/\/$/, '')}`
+  }
+  return 'http://localhost:3000'
 }
 
 async function saveUsers(users) {
@@ -370,6 +381,7 @@ app.post('/signup', upload.array('photos', 10), async (req, res) => {
     const photoPath = photoPaths.length > 0 ? photoPaths[0] : '';
     const passwordHash = await bcrypt.hash(password, 10);
 
+    const verificationToken = crypto.randomBytes(20).toString('hex');
     const newUser = {
       id: getRandomId(),
       name: sanitizeString(name),
@@ -389,7 +401,8 @@ app.post('/signup', upload.array('photos', 10), async (req, res) => {
       passed: [],
       matches: [],
       notifications: [],
-      emailVerified: true,
+      emailVerified: false,
+      verificationToken,
       suspended: false,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -399,8 +412,23 @@ app.post('/signup', upload.array('photos', 10), async (req, res) => {
     users.push(newUser);
     await saveUsers(users);
 
-    const token = jwt.sign({ id: String(newUser.id), email: normalizedEmail }, JWT_SECRET, { expiresIn: '24h' });
-    return res.json({ success: true, message: 'Signup complete.', user: cleanUserForClient(newUser), token });
+const verifyUrl = `${getPublicBaseUrl()}/verify-email?token=${verificationToken}`;
+    console.log('signup mail attempt', { to: normalizedEmail, from: process.env.EMAIL_FROM || process.env.FROM_EMAIL, verifyUrl });
+    const mailResult = await sendMail({
+      to: normalizedEmail,
+      subject: 'Verify your SPARK account',
+      html: `<h1>Verify your account</h1><p>Hi ${sanitizeString(name) || 'there'},</p><p>Please verify your email by clicking <a href="${verifyUrl}">this link</a>.</p>`,
+    });
+
+    if (!mailResult || !mailResult.success) {
+      console.error('Verification email failed:', mailResult?.error || 'Unknown error', mailResult?.response || null);
+      users.splice(users.indexOf(newUser), 1);
+      await saveUsers(users);
+      return res.status(500).json({ success: false, message: 'Unable to send verification email. Please try again later.' });
+    }
+
+    console.log('signup mail complete', { to: normalizedEmail, response: mailResult.result || null });
+    return res.json({ success: true, message: 'Signup complete. Please verify your email before logging in.', user: cleanUserForClient(newUser) });
   } catch (err) {
     console.error('Signup error:', err);
     return res.status(500).json({ success: false, message: 'Unable to create account.' });
@@ -443,6 +471,11 @@ app.post('/login', async (req, res) => {
       return res.json({ success: false, message: 'No account found' });
     }
 
+    if (user.emailVerified === false) {
+      console.log('login blocked: emailVerified false', { email: user.email, emailVerified: user.emailVerified, isVerified: user.isVerified, verificationToken: user.verificationToken, emailVerificationToken: user.emailVerificationToken });
+      return res.json({ success: false, message: 'Please verify your email before logging in.' });
+    }
+
     const passwordCandidates = [user.passwordHash || user.password || ''];
     let isValid = false;
     for (const candidateHash of passwordCandidates) {
@@ -481,20 +514,48 @@ app.post('/resend-verification', async (req, res) => {
   if (!email) {
     return res.status(400).json({ success: false, message: 'Missing email' });
   }
-  return res.json({ success: true, message: 'If that email exists, a verification link has been sent.' });
+
+  const users = await loadUsers();
+  const user = users.find(u => normalizeEmail(u.email) === email);
+  if (!user) {
+    return res.json({ success: true, message: 'If that email exists, a verification link has been sent.' });
+  }
+
+  if (!user.verificationToken) {
+    user.verificationToken = crypto.randomBytes(20).toString('hex');
+  }
+  const verifyUrl = `${getPublicBaseUrl()}/verify-email?token=${user.verificationToken}`;
+  try {
+    await sendMail({
+      to: user.email,
+      subject: 'Verify your SPARK account',
+      html: `<h1>Verify your account</h1><p>Please verify your email by clicking <a href="${verifyUrl}">this link</a>.</p>`,
+    });
+    await saveUsers(users);
+    return res.json({ success: true, message: 'A verification link has been sent. Check your inbox and spam folder.' });
+  } catch (err) {
+    console.error('Resend verification error:', err);
+    return res.status(500).json({ success: false, message: 'Unable to send verification email.' });
+  }
 });
 
 app.get('/verify-email', async (req, res) => {
   const token = String(req.query.token || '');
   const users = await loadUsers();
   const user = users.find(u => u.verificationToken === token);
+  const redirectUrl = `${getPublicBaseUrl()}/login`;
+
+  console.log('verify-email request', { token, found: Boolean(user), userEmail: user?.email, emailVerified: user?.emailVerified, isVerified: user?.isVerified, verificationToken: user?.verificationToken, emailVerificationToken: user?.emailVerificationToken });
+
   if (user) {
     user.emailVerified = true;
-    delete user.verificationToken;
+    user.isVerified = true;
     await saveUsers(users);
-    return res.send('<h2>Email verified</h2><p>Your email has been verified. You may now log in.</p>');
+    console.log('verify-email saved', { userEmail: user.email, emailVerified: user.emailVerified, isVerified: user.isVerified });
+    return res.redirect(`${redirectUrl}?verified=true`);
   }
-  return res.send('<h2>Verification</h2><p>Link invalid or already verified.</p>');
+
+  return res.redirect(`${redirectUrl}?verified=false`);
 });
 
 app.get('/discover', authMiddleware, async (req, res) => {
@@ -817,6 +878,24 @@ app.put('/api/user/profile', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Profile update error:', err);
     return res.status(500).json({ success: false, message: 'Unable to update profile' });
+  }
+});
+
+app.put('/api/user/face-verify', authMiddleware, async (req, res) => {
+  try {
+    const users = await loadUsers();
+    const currentUser = users.find(u => u.id === req.userId);
+    if (!currentUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    currentUser.faceVerified = true;
+    currentUser.updatedAt = Date.now();
+    await saveUsers(users);
+    return res.json({ success: true, user: cleanUserForClient(currentUser) });
+  } catch (err) {
+    console.error('Face verification update error:', err);
+    return res.status(500).json({ success: false, message: 'Unable to save verification status' });
   }
 });
 

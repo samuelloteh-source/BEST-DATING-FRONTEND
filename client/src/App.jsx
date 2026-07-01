@@ -6,7 +6,6 @@ import Matches from './Matches'
 import MessagesList from './MessagesList'
 import Messaging from './Messaging'
 import Profile from './Profile'
-import FaceCapture from './FaceCapture'
 import Likes from './Likes'
 import Admin from './admin'
 
@@ -61,12 +60,15 @@ function App() {
   })
   const [step, setStep] = useState(() => {
     const savedStep = Number(localStorage.getItem('signupStep') || 0)
-    return savedStep >= 1 && savedStep <= 4 ? savedStep : 1
+    return savedStep >= 1 && savedStep <= 3 ? savedStep : 1
   })
   const [message, setMessage] = useState('')
   const [signupStepMessage, setSignupStepMessage] = useState('')
   const [loginEmail, setLoginEmail] = useState('')
   const [loginPassword, setLoginPassword] = useState('')
+  const [canResendVerification, setCanResendVerification] = useState(false)
+  const [resendVerificationLoading, setResendVerificationLoading] = useState(false)
+  const [resendVerificationMessage, setResendVerificationMessage] = useState('')
   const [signup, setSignup] = useState({
     firstName: '', lastName: '', email: '', password: '', dob: '', country: '', stateRegion: '',
     gender: '', lookingFor: '',
@@ -74,11 +76,29 @@ function App() {
   })
 
   useEffect(() => {
+    const handleVerificationRedirect = () => {
+      const params = new URLSearchParams(window.location.search)
+      const verified = params.get('verified')
+      if (verified === 'true') {
+        setMessage('Email verified successfully. Please log in.')
+        params.delete('verified')
+        const url = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`
+        window.history.replaceState({}, '', url)
+      } else if (verified === 'false') {
+        setMessage('Verification link invalid or already used. Please log in or resend verification.')
+        setCanResendVerification(true)
+        params.delete('verified')
+        const url = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`
+        window.history.replaceState({}, '', url)
+      }
+    }
+
     const path = window.location.pathname.replace(/\/$/, '')
     if (path === '/signup') {
       setView('signup')
     } else if (path === '/login') {
       setView('login')
+      handleVerificationRedirect()
     }
 
     const handlePopState = () => {
@@ -87,6 +107,7 @@ function App() {
         setView('signup')
       } else if (currentPath === '/login') {
         setView('login')
+        handleVerificationRedirect()
       } else if (currentPath.startsWith('/app')) {
         setView('app')
         const page = currentPath.slice(4) || '/discover'
@@ -153,12 +174,16 @@ function App() {
   const handleLogin = async (e) => {
     e.preventDefault()
     localStorage.removeItem('signupStep')
+    setCanResendVerification(false)
+    setResendVerificationMessage('')
+    setMessage('')
     try {
       const res = await axios.post('/login', { email: loginEmail, password: loginPassword })
       if (res.data?.success) {
         setMessage('Login successful!')
         setLoginEmail('')
         setLoginPassword('')
+        setCanResendVerification(false)
         if (res.data?.token) {
           localStorage.setItem('authToken', res.data.token)
           axios.defaults.headers.common['Authorization'] = `Bearer ${res.data.token}`
@@ -172,11 +197,18 @@ function App() {
         }
         await fetchNotifications()
       } else {
-        setMessage(res.data?.message || 'Login failed')
+        const messageText = res.data?.message || 'Login failed'
+        setMessage(messageText)
+        if (/verify your email/i.test(messageText)) {
+          setCanResendVerification(true)
+        }
       }
     } catch (err) {
       const msg = err.response?.data?.message || err.message
       setMessage('Error: ' + msg)
+      if (/verify your email/i.test(msg)) {
+        setCanResendVerification(true)
+      }
     }
   }
 
@@ -332,110 +364,13 @@ function App() {
     }
   }, [step, locationAutoDetected])
 
-  const resetFaceVerification = () => {
-    setFaceVerified(false)
-    setFaceVerificationSkipped(false)
-    setFaceVerifyResult(null)
-  }
   const handleFileChange = (e) => {
-    resetFaceVerification()
     handleSignupChange('profileFiles', Array.from(e.target.files || []))
-  }
-  const handleSelfieChange = (e) => {
-    resetFaceVerification()
-    handleSignupChange('selfieFile', e.target.files?.[0] || null)
-  }
-  const handleSelfieBlob = (file) => {
-    resetFaceVerification()
-    handleSignupChange('selfieFile', file)
-  }
-  const [faceVerifying, setFaceVerifying] = useState(false)
-  const [faceVerifyResult, setFaceVerifyResult] = useState(null)
-  const [faceVerified, setFaceVerified] = useState(false)
-  const [faceVerificationSkipped, setFaceVerificationSkipped] = useState(false)
-
-  const verifyFace = async () => {
-    setFaceVerifying(true)
-    setFaceVerifyResult(null)
-    console.log('verifyFace: started', { profileFiles: signup.profileFiles?.length || 0, hasSelfie: !!signup.selfieFile })
-    try {
-      const profileFile = signup.profileFiles?.[0]
-      const selfieFile = signup.selfieFile
-      if (!profileFile || !selfieFile) {
-        setFaceVerifyResult({ success: false, message: 'Profile photo and selfie are required for verification.' })
-        setFaceVerifying(false)
-        return
-      }
-
-      if (!window.faceapi) {
-        setFaceVerifyResult({ success: false, message: 'Face API not loaded. Please try again.' })
-        setFaceVerifying(false)
-        return
-      }
-
-      const faceapi = window.faceapi
-
-      const loadImageFromFile = async (file) => {
-        const url = URL.createObjectURL(file)
-        const img = new Image()
-        img.crossOrigin = 'anonymous'
-        await new Promise((resolve, reject) => {
-          img.onload = resolve
-          img.onerror = reject
-          img.src = url
-        })
-        return { img, url }
-      }
-
-      const getDescriptorFromFile = async (file, label) => {
-        const { img, url } = await loadImageFromFile(file)
-        try {
-          const detections = await faceapi.detectAllFaces(img).withFaceLandmarks().withFaceDescriptors()
-          if (!detections || detections.length === 0) {
-            throw new Error(`No face detected in ${label}. Please upload a clear photo of your face.`)
-          }
-          return detections[0].descriptor
-        } finally {
-          URL.revokeObjectURL(url)
-        }
-      }
-
-      const profileDescriptor = await getDescriptorFromFile(profileFile, 'profile photo')
-      const selfieDescriptor = selfieFile.descriptor || await getDescriptorFromFile(selfieFile, 'selfie')
-
-      const distance = Math.sqrt(
-        profileDescriptor.reduce((sum, v, i) => sum + Math.pow(v - selfieDescriptor[i], 2), 0)
-      )
-      const match = distance < 0.55
-      const score = Math.max(0, 1 - distance)
-      console.log('verifyFace: computed descriptors', { distance, match, score })
-
-      console.log('verifyFace: sending to /verify/face')
-      const res = await axios.post('/verify/face', { match, score, distance })
-      console.log('verifyFace: /verify/face response status', res.status)
-      const result = res.data || { success: false, message: 'No response' }
-      console.log('verifyFace: /verify/face response data', result)
-      setFaceVerifyResult(result)
-      const passed = Boolean(result.success && result.match)
-      setFaceVerified(passed)
-      setFaceVerificationSkipped(false)
-    } catch (err) {
-      console.error('verifyFace error', err, err?.response?.data)
-      if (!err.response) {
-        setFaceVerifyResult({ success: false, message: 'Network error: unable to reach server. Please check your connection or try again.' })
-      } else {
-        setFaceVerifyResult({ success: false, message: err.response?.data?.message || err.message })
-      }
-      setFaceVerified(false)
-      setFaceVerificationSkipped(false)
-    } finally {
-      setFaceVerifying(false)
-    }
   }
   const goNext = () => {
     setMessage('')
     setSignupStepMessage('')
-    setStep(s => Math.min(s + 1, 4))
+    setStep(s => Math.min(s + 1, 3))
   }
   const goBack = () => {
     setMessage('')
@@ -447,33 +382,20 @@ function App() {
     window.history.pushState({}, '', `/app/${page}`)
   }
 
-  const submitSignup = async ({ skipVerification = false } = {}) => {
+  const submitSignup = async () => {
     const emailToCheck = (signup.email || '').trim()
-    console.log('submitSignup', { email: emailToCheck, signup, skipVerification })
+    console.log('submitSignup', { email: emailToCheck, signup })
     setMessage('')
     setSignupStepMessage('')
 
     if (!isValidEmail(emailToCheck)) {
       setStep(1)
       setSignupStepMessage('Please enter a valid email address before finishing signup.')
-      if (skipVerification) {
-        window.alert('Please enter a valid email address before finishing signup.')
-      }
       return false
     }
 
     if (!signup.profileFiles || signup.profileFiles.length === 0) {
       setMessage('Please upload at least one profile photo before finishing signup.')
-      return false
-    }
-
-    if (!signup.selfieFile && !skipVerification) {
-      setMessage('Please upload or capture a selfie before finishing signup.')
-      return false
-    }
-
-    if (signup.profileFiles?.[0] && signup.selfieFile && !faceVerified && !skipVerification && !faceVerificationSkipped) {
-      setMessage('Please verify your face or skip verification before finishing signup.')
       return false
     }
 
@@ -490,21 +412,17 @@ function App() {
       formData.append('gender', signup.gender)
       formData.append('lookingFor', signup.lookingFor)
       signup.profileFiles?.forEach((file) => formData.append('photos', file))
-      if (signup.selfieFile) formData.append('photos', signup.selfieFile)
 
       const res = await axios.post('/signup', formData, { timeout: 60000 })
       if (res.data?.success) {
-        if (res.data?.token) {
-          localStorage.setItem('authToken', res.data.token)
-          axios.defaults.headers.common['Authorization'] = `Bearer ${res.data.token}`
-          setAuthToken(res.data.token)
-        }
-        if (res.data?.user) {
-          setUser(res.data.user)
-        }
-        setMessage('Signup complete! Welcome to the app.')
-        setView('app')
-        window.history.pushState({}, '', '/app/discover')
+        setLoginEmail(emailToCheck)
+        setMessage('Signup complete! Please check your email (including spam folder) and verify your account before logging in.')
+        setView('login')
+        window.history.pushState({}, '', '/login')
+        localStorage.removeItem('authToken')
+        delete axios.defaults.headers.common['Authorization']
+        setAuthToken(null)
+        setUser(null)
         localStorage.removeItem('signupStep')
         setStep(1)
         setSignup({ firstName:'', lastName:'', email:'', password:'', dob:'', country:'', stateRegion:'', gender:'', lookingFor:'', interests:[], bio:'', profileFiles: [], selfieFile: null })
@@ -557,36 +475,13 @@ function App() {
         return false
       }
     }
-    if (step === 4) {
-      if (!signup.selfieFile && !faceVerificationSkipped) {
-        setSignupStepMessage('Please upload or capture a selfie before finishing signup.')
-        return false
-      }
-    }
     setSignupStepMessage('')
     return true
   }
 
-  const handleSkipVerification = async () => {
-    setMessage('')
-    setSignupStepMessage('')
-    if (!signup.profileFiles || signup.profileFiles.length === 0) {
-      setMessage('Please upload at least one profile photo before skipping verification.')
-      return
-    }
-    console.log('handleSkipVerification', { signup })
-    setFaceVerificationSkipped(true)
-    const success = await submitSignup({ skipVerification: true })
-    if (!success && !isValidEmail((signup.email || '').trim())) {
-      setStep(1)
-      setSignupStepMessage('Please enter a valid email address before finishing signup.')
-      window.alert('Please enter a valid email address before finishing signup.')
-    }
-  }
-
   const handleNext = async () => {
     if (!validateSignupStep()) return
-    if (step < 4) {
+    if (step < 3) {
       goNext()
       return
     }
@@ -598,6 +493,28 @@ function App() {
     await handleNext()
   }
 
+  const handleResendVerification = async () => {
+    if (!loginEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginEmail)) {
+      setResendVerificationMessage('Enter a valid email address to resend verification.')
+      return
+    }
+    setResendVerificationLoading(true)
+    setResendVerificationMessage('')
+    try {
+      const res = await axios.post('/resend-verification', { email: loginEmail })
+      if (res.data?.success) {
+        setResendVerificationMessage(res.data.message || 'Verification email resent. Check your inbox and spam folder.')
+      } else {
+        setResendVerificationMessage(res.data?.message || 'Unable to resend verification email. Please try again.')
+      }
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message
+      setResendVerificationMessage('Error: ' + msg)
+    } finally {
+      setResendVerificationLoading(false)
+    }
+  }
+
   const loginView = (
     <div className="page-shell">
       <div className="page-card">
@@ -606,7 +523,7 @@ function App() {
         <form className="form-card" onSubmit={handleLogin}>
           <div className="form-field">
             <label>Email</label>
-            <input type="email" value={loginEmail} onChange={e=>setLoginEmail(e.target.value)} placeholder="you@example.com" required />
+            <input type="email" value={loginEmail} onChange={e=>{ setLoginEmail(e.target.value); setCanResendVerification(false); setResendVerificationMessage('') }} placeholder="you@example.com" required />
           </div>
           <div className="form-field">
             <label>Password</label>
@@ -614,7 +531,20 @@ function App() {
           </div>
           <button type="submit" className="primary-button">Login</button>
         </form>
-        <p className="page-note">Don't have an account? <button type="button" className="button-link" onClick={() => { setView('signup'); setStep(1); setMessage(''); setSignupStepMessage(''); window.history.pushState({}, '', '/signup') }}>Signup</button></p>
+        {canResendVerification && (
+          <div className="form-note" style={{ marginTop: 16 }}>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={handleResendVerification}
+              disabled={resendVerificationLoading}
+            >
+              {resendVerificationLoading ? 'Resending…' : 'Resend verification email'}
+            </button>
+            {resendVerificationMessage && <p className="form-message" style={{ marginTop: 8 }}>{resendVerificationMessage}</p>}
+          </div>
+        )}
+        <p className="page-note">Don't have an account? <button type="button" className="button-link" onClick={() => { setView('signup'); setStep(1); setMessage(''); setSignupStepMessage(''); setCanResendVerification(false); setResendVerificationMessage(''); window.history.pushState({}, '', '/signup') }}>Signup</button></p>
         {message && <p className="form-message">{message}</p>}
       </div>
     </div>
@@ -624,8 +554,8 @@ function App() {
     <div className="page-shell">
       <div className="page-card">
         <h1 className="page-title">Signup</h1>
-        <p className="page-subtitle">Finish your profile in four quick steps.</p>
-        <div className="step-indicator">Step {step} of 4</div>
+        <p className="page-subtitle">Finish your profile in three quick steps.</p>
+        <div className="step-indicator">Step {step} of 3</div>
         {message && <p className="form-message form-message--error">{message}</p>}
         <form className="form-card" onSubmit={handleSignupSubmit}>
           {step === 1 && (
@@ -702,46 +632,9 @@ function App() {
               </div>
             </>
           )}
-          {step === 4 && (
-            <>
-              <div className="form-field">
-                <label>Face verification</label>
-                <p className="hint">Please upload a selfie or capture one to verify your face matches your profile photo.</p>
-                <div className="form-field">
-                  <label>Upload a selfie</label>
-                  <input type="file" accept="image/*" onChange={handleSelfieChange} required />
-                </div>
-                <div className="mt-3">
-                  <FaceCapture onCapture={handleSelfieBlob} />
-                </div>
-
-                {signup.profileFiles && signup.profileFiles.length > 0 && (
-                  <div className="preview" style={{marginTop:12}}>
-                    <p className="hint">Profile photo to verify against:</p>
-                    <img src={signup.profileFiles[0] ? URL.createObjectURL(signup.profileFiles[0]) : ''} alt="Profile preview" style={{maxWidth:200,borderRadius:12}} />
-                  </div>
-                )}
-
-                <div className="mt-3">
-                  <button type="button" className="secondary-button" onClick={verifyFace} disabled={faceVerifying}>{faceVerifying ? 'Verifying…' : 'Verify face'}</button>
-                  <button type="button" className="secondary-button" onClick={handleSkipVerification} disabled={faceVerifying} style={{marginLeft:8}}>Skip verification</button>
-                </div>
-
-                {faceVerifyResult && (
-                  <div style={{marginTop:10}}>
-                    {faceVerifyResult.success ? (
-                      <p style={{color: faceVerifyResult.match ? 'green' : 'orange'}}>{faceVerifyResult.match ? 'Face verification passed' : `Face mismatch (score ${faceVerifyResult.score?.toFixed ? faceVerifyResult.score.toFixed(3) : faceVerifyResult.score})`}</p>
-                    ) : (
-                      <p style={{color:'red'}}>Verification error: {faceVerifyResult.message}</p>
-                    )}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
           <div className="button-row">
             {step > 1 && <button type="button" className="secondary-button" onClick={goBack}>Back</button>}
-            <button type="button" className="primary-button" onClick={handleNext} disabled={step === 4 && signup.profileFiles?.[0] && signup.selfieFile && !faceVerified && !faceVerificationSkipped}>
+            <button type="button" className="primary-button" onClick={handleNext}>
               {step < 4 ? 'Next' : 'Finish signup'}
             </button>
           </div>

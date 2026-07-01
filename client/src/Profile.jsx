@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import axios, { apiBaseUrl } from './api'
+import FaceCapture from './FaceCapture'
 
 const interestOptions = [
   'Travel', 'Cooking', 'Music', 'Fitness', 'Movies', 'Reading', 'Art & Culture',
@@ -24,6 +25,13 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
   const [gallery, setGallery] = useState([])
   const [galleryUploading, setGalleryUploading] = useState(false)
   const [galleryMessage, setGalleryMessage] = useState('')
+  const [verificationMessage, setVerificationMessage] = useState('')
+  const [verificationLoading, setVerificationLoading] = useState(false)
+  const [faceVerificationLoading, setFaceVerificationLoading] = useState(false)
+  const [faceVerificationResult, setFaceVerificationResult] = useState(null)
+  const [faceVerificationDone, setFaceVerificationDone] = useState(false)
+  const [selfieFile, setSelfieFile] = useState(null)
+  const [selfiePreview, setSelfiePreview] = useState('')
 
   const resolveImageUrl = (url) => {
     if (!url) return ''
@@ -42,6 +50,7 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
       interests: Array.isArray(user.interests) ? user.interests : []
     })
     setGallery(Array.isArray(user.gallery) ? user.gallery : [])
+    setFaceVerificationDone(Boolean(user.faceVerified))
     fetchGallery()
   }, [user])
 
@@ -89,6 +98,104 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
     if (files.length === 0) return
     uploadGalleryFiles(files)
     event.target.value = null
+  }
+
+  const handleSelfieChange = (event) => {
+    const file = event.target.files?.[0] || null
+    setFaceVerificationResult(null)
+    setSelfieFile(file)
+    if (file) {
+      const url = URL.createObjectURL(file)
+      setSelfiePreview(url)
+    } else {
+      if (selfiePreview) URL.revokeObjectURL(selfiePreview)
+      setSelfiePreview('')
+    }
+  }
+
+  const handleFaceCapture = (file) => {
+    setFaceVerificationResult(null)
+    setSelfieFile(file)
+    if (file) {
+      const url = URL.createObjectURL(file)
+      setSelfiePreview(url)
+    }
+  }
+
+  const verifyFace = async () => {
+    if (!selfieFile) {
+      setFaceVerificationResult({ success: false, message: 'Please capture or upload a selfie to verify.' })
+      return
+    }
+    const profileImageUrl = resolveImageUrl(user.avatar || user.photo || '')
+    if (!profileImageUrl) {
+      setFaceVerificationResult({ success: false, message: 'Please set a profile photo before verifying your face.' })
+      return
+    }
+
+    setFaceVerificationLoading(true)
+    setFaceVerificationResult(null)
+
+    try {
+      if (!window.faceapi) {
+        throw new Error('Face API is not loaded. Please refresh the page and try again.')
+      }
+      const faceapi = window.faceapi
+
+      const loadImageFromFile = async (file) => {
+        const url = URL.createObjectURL(file)
+        const img = new Image()
+        img.crossOrigin = 'anonymous'
+        await new Promise((resolve, reject) => {
+          img.onload = resolve
+          img.onerror = reject
+          img.src = url
+        })
+        return { img, url }
+      }
+
+      const getDescriptorFromFile = async (file, label) => {
+        const { img, url } = await loadImageFromFile(file)
+        try {
+          const detections = await faceapi.detectAllFaces(img).withFaceLandmarks().withFaceDescriptors()
+          if (!detections || detections.length === 0) {
+            throw new Error(`No face detected in ${label}. Please use a clear image.`)
+          }
+          return detections[0].descriptor
+        } finally {
+          URL.revokeObjectURL(url)
+        }
+      }
+
+      const profileResponse = await fetch(profileImageUrl, { mode: 'cors' })
+      const blob = await profileResponse.blob()
+      const profileFile = new File([blob], 'profile.jpg', { type: blob.type })
+      const profileDescriptor = await getDescriptorFromFile(profileFile, 'profile photo')
+      const selfieDescriptor = await getDescriptorFromFile(selfieFile, 'selfie')
+
+      const distance = Math.sqrt(profileDescriptor.reduce((sum, v, i) => sum + Math.pow(v - selfieDescriptor[i], 2), 0))
+      const match = distance < 0.55
+      const score = Math.max(0, 1 - distance)
+
+      const res = await axios.post('/verify/face', { match, score, distance })
+      if (res.data?.success) {
+        setFaceVerificationResult({ success: match, message: match ? 'Face verification passed.' : `Face mismatch (score ${score.toFixed(3)})` })
+        if (match) {
+          await axios.put('/api/user/face-verify')
+          setFaceVerificationDone(true)
+          if (typeof onUpdateUser === 'function') {
+            onUpdateUser({ ...user, faceVerified: true })
+          }
+        }
+      } else {
+        setFaceVerificationResult({ success: false, message: res.data?.message || 'Verification failed.' })
+      }
+    } catch (err) {
+      console.error('Face verification error', err)
+      setFaceVerificationResult({ success: false, message: err.response?.data?.message || err.message || 'Face verification failed.' })
+    } finally {
+      setFaceVerificationLoading(false)
+    }
   }
 
   const handleDeleteGalleryImage = async (imageId) => {
@@ -236,6 +343,19 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
       onUpdateDiscoverFilters(filterForm)
     }
     setMessage('Discover settings saved.')
+  }
+
+  const handleResendVerification = async () => {
+    setVerificationLoading(true)
+    setVerificationMessage('')
+    try {
+      const res = await axios.post('/resend-verification', { email: user?.email })
+      setVerificationMessage(res.data?.message || 'Verification email sent.')
+    } catch (err) {
+      setVerificationMessage('Error: ' + (err.response?.data?.message || err.message))
+    } finally {
+      setVerificationLoading(false)
+    }
   }
 
   return (
@@ -391,6 +511,77 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
                   </div>
                 </form>
               )}
+
+              <div className="mt-6 rounded-[32px] border border-white/10 bg-black/20 p-6 shadow-lg shadow-black/10 backdrop-blur-xl">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-2xl font-semibold text-white">Verify your account</h3>
+                    <p className="mt-2 text-sm text-slate-300">Send yourself a fresh email verification link if the first one did not arrive.</p>
+                  </div>
+                  <div className="text-right">
+                    <div className={`inline-flex items-center rounded-full px-3 py-1 text-sm ${user.emailVerified ? 'bg-emerald-500 text-white' : 'bg-yellow-500 text-black'}`}>
+                      {user.emailVerified ? 'Email verified' : 'Email not verified'}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleResendVerification}
+                      disabled={verificationLoading}
+                      className="mt-3 inline-flex items-center justify-center rounded-3xl bg-gradient-to-r from-pink-500 to-orange-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-pink-500/25 transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {verificationLoading ? 'Sending…' : 'Send verification link'}
+                    </button>
+                  </div>
+                </div>
+                {verificationMessage && <p className="mt-3 text-sm text-emerald-300">{verificationMessage}</p>}
+              </div>
+
+              <div className="mt-6 rounded-[32px] border border-white/10 bg-black/20 p-6 shadow-lg shadow-black/10 backdrop-blur-xl">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-2xl font-semibold text-white">Face verification (optional)</h3>
+                    <p className="mt-2 text-sm text-slate-300">Verify your profile image against a selfie anytime from your profile.</p>
+                  </div>
+                  <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm ${faceVerificationDone ? 'bg-emerald-500 text-white' : 'bg-slate-600 text-white'}`}>
+                    {faceVerificationDone ? 'Face verified' : 'Optional'}
+                  </span>
+                </div>
+
+                <div className="mt-5 grid gap-5 sm:grid-cols-2">
+                  <div className="space-y-3">
+                    <div className="text-sm text-slate-300">Current profile image</div>
+                    {user.avatar || user.photo ? (
+                      <img src={resolveImageUrl(user.avatar || user.photo)} alt="Profile" className="h-48 w-full rounded-3xl object-cover" />
+                    ) : (
+                      <div className="h-48 rounded-3xl border border-dashed border-white/15 bg-white/5 flex items-center justify-center text-slate-400">No profile image set</div>
+                    )}
+                  </div>
+                  <div className="space-y-3">
+                    <label className="block text-sm text-slate-300">Upload or capture a verification selfie</label>
+                    <input type="file" accept="image/*" onChange={handleSelfieChange} className="w-full rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none" />
+                    <FaceCapture onCapture={handleFaceCapture} />
+                    {selfiePreview && (
+                      <div className="rounded-3xl border border-white/10 bg-slate-950 p-3">
+                        <img src={selfiePreview} alt="Selfie preview" className="h-48 w-full rounded-3xl object-cover" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-5 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={verifyFace}
+                    disabled={faceVerificationLoading || !selfieFile || !user.avatar && !user.photo}
+                    className="inline-flex items-center justify-center rounded-3xl bg-gradient-to-r from-pink-500 to-orange-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-pink-500/25 transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {faceVerificationLoading ? 'Verifying…' : 'Verify face'}
+                  </button>
+                  {!selfieFile && <p className="text-sm text-slate-400">Upload or capture a selfie to start verification.</p>}
+                </div>
+                {faceVerificationResult && (
+                  <p className={`mt-4 text-sm ${faceVerificationResult.success ? 'text-emerald-300' : 'text-red-400'}`}>{faceVerificationResult.message}</p>
+                )}
+              </div>
 
               <div className="mt-6 rounded-[32px] border border-white/10 bg-black/20 p-6 shadow-lg shadow-black/10 backdrop-blur-xl">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">

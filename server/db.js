@@ -71,7 +71,13 @@ function normalizeUserRecord(user) {
     id: user._id ? String(user._id) : String(user.id || ''),
     password: user.password || user.passwordHash || '',
     photo: user.photo || user.photoUrl || '',
-    emailVerified: user.emailVerified !== undefined ? user.emailVerified : (user.isVerified !== undefined ? user.isVerified : undefined),
+    emailVerified: user.isVerified !== undefined
+      ? user.isVerified
+      : user.emailVerified !== undefined
+        ? user.emailVerified
+        : undefined,
+    verificationToken: user.verificationToken || user.emailVerificationToken || undefined,
+    emailVerificationToken: user.emailVerificationToken || user.verificationToken || undefined,
   };
   delete normalized._id;
   delete normalized.__v;
@@ -172,18 +178,26 @@ async function saveUsersToDb(users) {
       ? String(existingUser._id)
       : String(user.id || user._id || user.email || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
 
+    const verifiedValue = user.isVerified !== undefined
+      ? user.isVerified
+      : user.emailVerified !== undefined
+        ? Boolean(user.emailVerified)
+        : undefined;
+
     const update = {
       name: user.name || '',
       email,
       passwordHash: user.passwordHash || user.password || '',
       photoUrl: user.photoUrl || user.photo || '',
-      ...(user.isVerified !== undefined || user.emailVerified !== undefined ? {
-        isVerified: user.isVerified !== undefined ? user.isVerified : Boolean(user.emailVerified)
+      ...(verifiedValue !== undefined ? {
+        isVerified: verifiedValue,
+        emailVerified: verifiedValue
       } : {}),
       authToken: user.authToken,
       authTokenExpires: user.authTokenExpires,
       sessionVersion: typeof user.sessionVersion === 'number' ? user.sessionVersion : Number(user.sessionVersion || 0),
-      emailVerificationToken: user.emailVerificationToken,
+      emailVerificationToken: user.emailVerificationToken || user.verificationToken,
+      verificationToken: user.verificationToken || user.emailVerificationToken,
       passwordResetToken: user.passwordResetToken,
       passwordResetExpires: user.passwordResetExpires,
       suspended: !!user.suspended,
