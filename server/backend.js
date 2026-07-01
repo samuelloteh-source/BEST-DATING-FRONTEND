@@ -97,9 +97,55 @@ function normalizePhotoUrl(value) {
   const trimmed = value.trim();
   if (!trimmed) return '';
   if (/^(https?:)?\/\//i.test(trimmed)) return trimmed;
+  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) return trimmed;
   if (trimmed.startsWith('/')) return trimmed;
   if (trimmed.startsWith('uploads/')) return `/${trimmed}`;
   return `/uploads/${trimmed}`;
+}
+
+async function saveUploadedFile(file) {
+  if (!file) return '';
+  const extension = path.extname(file.originalname || '') || '';
+  const fileName = `${getRandomId()}${extension}`;
+  const targetPath = path.join(UPLOADS_DIR, fileName);
+
+  await fs.mkdir(UPLOADS_DIR, { recursive: true });
+
+  if (file.path) {
+    return normalizePhotoUrl(`/uploads/${path.basename(file.path)}`);
+  }
+
+  if (file.buffer) {
+    if (process.env.VERCEL) {
+      const mimeType = file.mimetype || 'application/octet-stream';
+      return `data:${mimeType};base64,${file.buffer.toString('base64')}`;
+    }
+    await fs.writeFile(targetPath, file.buffer);
+    return normalizePhotoUrl(`/uploads/${fileName}`);
+  }
+
+  if (file.stream && typeof file.stream.pipe === 'function') {
+    if (process.env.VERCEL) {
+      const chunks = [];
+      await new Promise((resolve, reject) => {
+        file.stream.on('data', (chunk) => chunks.push(chunk));
+        file.stream.on('end', resolve);
+        file.stream.on('error', reject);
+      });
+      const buffer = Buffer.concat(chunks);
+      const mimeType = file.mimetype || 'application/octet-stream';
+      return `data:${mimeType};base64,${buffer.toString('base64')}`;
+    }
+    await fs.mkdir(UPLOADS_DIR, { recursive: true });
+    await new Promise((resolve, reject) => {
+      const stream = file.stream.pipe(fs.createWriteStream(targetPath));
+      stream.on('finish', resolve);
+      stream.on('error', reject);
+    });
+    return normalizePhotoUrl(`/uploads/${fileName}`);
+  }
+
+  throw new Error('Unable to save uploaded file');
 }
 
 function normalizeEmail(email) {
@@ -377,7 +423,11 @@ app.post('/signup', upload.array('photos', 10), async (req, res) => {
         : [];
 
     const files = Array.isArray(req.files) ? req.files : [];
-    const photoPaths = files.map((file) => `/uploads/${file.filename}`);
+    const photoPaths = [];
+    for (const file of files) {
+      const uploaded = await saveUploadedFile(file);
+      if (uploaded) photoPaths.push(uploaded);
+    }
     const photoPath = photoPaths.length > 0 ? photoPaths[0] : '';
     const passwordHash = await bcrypt.hash(password, 10);
 
@@ -806,7 +856,7 @@ app.get('/messages/conversation/:contactId', authMiddleware, async (req, res) =>
 
 app.post('/messages/send', authMiddleware, upload.single('photo'), async (req, res) => {
   const { recipientId, text } = req.body;
-  const photo = req.file ? `/uploads/${req.file.filename}` : '';
+  const photo = req.file ? await saveUploadedFile(req.file) : '';
   const trimmedText = String(text || '').trim();
 
   if (!recipientId || (!trimmedText && !photo)) {
@@ -921,7 +971,8 @@ app.post('/profile/gallery', authMiddleware, upload.single('image'), async (req,
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    const image = { id: getRandomId(), url: `/uploads/${req.file.filename}` };
+    const imageUrl = await saveUploadedFile(req.file);
+    const image = { id: getRandomId(), url: imageUrl };
     currentUser.gallery = Array.isArray(currentUser.gallery) ? currentUser.gallery : [];
     currentUser.gallery.push(image);
     await saveUsers(users);
