@@ -279,7 +279,7 @@ function resolveUserByToken(token, users) {
     try {
       const payload = jwt.verify(token, JWT_SECRET);
       if (!payload || !payload.id) return null;
-      const user = users.find(u => String(u.id) === String(payload.id));
+      const user = users.find(u => String(u.id) === String(payload.id) || String(u._id) === String(payload.id));
       if (!user) return null;
       const expectedSessionVersion = Number(user.sessionVersion || 0);
       const suppliedSessionVersion = Number(payload.sessionVersion || 0);
@@ -517,6 +517,11 @@ app.post('/login', async (req, res) => {
     const normalizedEmail = normalizeEmail(email);
     const user = await User.findOne({ email: normalizedEmail }).lean();
 
+    const passwordCandidates = [user?.passwordHash || user?.password || ''];
+    if (user && !user.passwordHash && user.password) {
+      passwordCandidates.push(user.password);
+    }
+
     if (!user) {
       const pendingSignups = await loadPendingSignupsFromFile();
       const pending = cleanupPendingSignups(pendingSignups).find(p => normalizeEmail(p.email) === normalizedEmail);
@@ -532,7 +537,17 @@ app.post('/login', async (req, res) => {
       return res.json({ success: false, message: 'Please verify your email before logging in.' });
     }
 
-    const match = await bcrypt.compare(password, user.passwordHash || user.password || '');
+    let match = false;
+    for (const candidateHash of passwordCandidates) {
+      if (!candidateHash) continue;
+      try {
+        match = await bcrypt.compare(password, candidateHash);
+        if (match) break;
+      } catch (err) {
+        console.warn('Password compare failed for login candidate', err && err.message ? err.message : err);
+      }
+    }
+
     if (!match) {
       return res.json({ success: false, message: 'Wrong password' });
     }

@@ -3,7 +3,7 @@ const https = require('https');
 
 const baseUrl = 'http://127.0.0.1:3000';
 const testEmail = 'ava.brooks@example.com';
-const testPassword = 'password123';
+const testPassword = 'Password123!';
 
 (async () => {
   try {

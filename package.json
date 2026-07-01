@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "cd client && npm run dev",
-    "build": "cd client && npm install && npm run build",
+    "dev": "npm --prefix client install && npm --prefix client run dev",
+    "build": "npm --prefix client install && npm --prefix client run build",
     "vercel-build": "npm run build",
     "start": "node server/index.js"
   },

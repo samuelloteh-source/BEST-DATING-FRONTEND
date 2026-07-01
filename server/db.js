@@ -145,7 +145,8 @@ async function loadUsersFromDb() {
   }
 
   const users = await User.find().lean();
-  return users.map(normalizeUserRecord);
+  const normalized = users.map(normalizeUserRecord);
+  return await ensureRepoSeedUsers(normalized);
 }
 
 async function saveUsersToDb(users) {

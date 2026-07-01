@@ -161,12 +161,14 @@ async function writeJson(filePath, data) {
 
 async function loadUsers() {
   await db.initDb();
-  return await db.loadUsersFromDb();
+  const users = await db.loadUsersFromDb();
+  return Array.isArray(users) ? users.map((u) => ({ ...u, id: String(u.id || u._id || ''), email: normalizeEmail(u.email) })) : [];
 }
 
 async function saveUsers(users) {
   await db.initDb();
-  await db.saveUsersToDb(users);
+  const normalized = Array.isArray(users) ? users.map((u) => ({ ...u, id: String(u.id || u._id || ''), email: normalizeEmail(u.email) })) : [];
+  await db.saveUsersToDb(normalized);
 }
 
 async function loadMessages() {
@@ -441,7 +443,17 @@ app.post('/login', async (req, res) => {
       return res.json({ success: false, message: 'No account found' });
     }
 
-    const isValid = await bcrypt.compare(password, user.passwordHash || '');
+    const passwordCandidates = [user.passwordHash || user.password || ''];
+    let isValid = false;
+    for (const candidateHash of passwordCandidates) {
+      if (!candidateHash) continue;
+      try {
+        isValid = await bcrypt.compare(password, candidateHash);
+        if (isValid) break;
+      } catch (err) {
+        console.warn('Password compare failed in backend login', err && err.message ? err.message : err);
+      }
+    }
     if (!isValid) {
       return res.json({ success: false, message: 'Wrong password' });
     }
