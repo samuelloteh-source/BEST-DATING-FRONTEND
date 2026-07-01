@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const sendEmail = require('./sendEmail');
+const { sendMail } = require('./mailer');
 const dotenv = require('dotenv');
 const multer = require('multer');
 const path = require('path');
@@ -500,6 +501,17 @@ app.post('/signup', maybeUpload, async (req, res) => {
     });
 
     console.log('User created in MongoDB:', email);
+
+    try {
+      await sendMail({
+        to: email,
+        subject: 'Welcome to SPARK',
+        html: `<h1>Welcome ${name || 'there'}!</h1><p>Your account is live and ready to use.</p>`,
+      });
+    } catch (mailErr) {
+      console.warn('Welcome email failed:', mailErr && mailErr.message ? mailErr.message : mailErr);
+    }
+
     res.json({ success: true, message: 'Signup successful. You may now log in.' });
   } catch (err) {
     console.error('SIGNUP ERROR:', err);
