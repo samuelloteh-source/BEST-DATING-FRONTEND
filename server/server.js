@@ -1422,30 +1422,30 @@ app.get('/discover', requireAuth, async (req, res) => {
   try {
     const users = await loadUsersFromFile();
     const currentUser = getUserById(req.userId, users);
-    
+
     if (!currentUser) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    // Get list of users to exclude (self, already liked, already matched)
-    const likedIds = currentUser.likes || [];
-    const passedIds = currentUser.passed || [];
-    const excludeIds = new Set([req.userId, ...likedIds, ...passedIds]);
+    const excluded = new Set([
+      String(currentUser.id),
+      ...(Array.isArray(currentUser.passed) ? currentUser.passed.map(String) : []),
+      ...(Array.isArray(currentUser.likes) ? currentUser.likes.map(String) : []),
+      ...(Array.isArray(currentUser.matches) ? currentUser.matches.map(String) : [])
+    ]);
 
-    const otherUsers = users.filter(u => String(u.id) !== String(req.userId));
-    const visibleMatches = otherUsers.filter(u =>
-      !excludeIds.has(u.id) &&
-      !u.suspended
-    );
-    const potentialMatches = visibleMatches.length > 0
-      ? visibleMatches
-      : otherUsers.filter(u => !excludeIds.has(u.id));
+    const potentialMatches = users
+      .filter((u) => {
+        if (!u || String(u.id) === String(currentUser.id)) return false;
+        if (excluded.has(String(u.id))) return false;
+        if (u.suspended) return false;
+        if (u.emailVerified === false) return false;
+        return true;
+      })
+      .map((u) => cleanUserForClient(u));
 
-    // Shuffle and return top 10
-    const shuffled = potentialMatches.sort(() => Math.random() - 0.5).slice(0, 10);
-    const safe = shuffled.map(u => cleanUserForClient(u));
-
-    res.json({ success: true, users: safe });
+    const shuffled = potentialMatches.sort(() => Math.random() - 0.5).slice(0, 120);
+    res.json({ success: true, users: shuffled });
   } catch (err) {
     console.error('Discover error:', err);
     res.status(500).json({ success: false, message: 'Failed to fetch discover' });

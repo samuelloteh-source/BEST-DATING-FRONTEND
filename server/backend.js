@@ -499,22 +499,31 @@ app.get('/verify-email', async (req, res) => {
 
 app.get('/discover', authMiddleware, async (req, res) => {
   const users = await loadUsers();
-  const currentUser = users.find(u => u.id === req.userId);
+  const currentUser = users.find(u => String(u.id) === String(req.userId));
   if (!currentUser) {
     return res.status(404).json({ success: false, message: 'User not found' });
   }
 
-  const excluded = new Set([currentUser.id, ...(currentUser.passed || []), ...(currentUser.likes || []), ...(currentUser.matches || [])]);
+  const excluded = new Set([
+    String(currentUser.id),
+    ...(Array.isArray(currentUser.passed) ? currentUser.passed.map(String) : []),
+    ...(Array.isArray(currentUser.likes) ? currentUser.likes.map(String) : []),
+    ...(Array.isArray(currentUser.matches) ? currentUser.matches.map(String) : []),
+  ]);
+
   const candidates = users
-    .filter(u => {
-      if (excluded.has(u.id)) return false;
-      // Filter out offline seeded users
-      if (u.id && u.id.startsWith('seed_') && !scheduler.isSeededUserOnline(u.id)) return false;
+    .filter((u) => {
+      if (!u || String(u.id) === String(currentUser.id)) return false;
+      if (excluded.has(String(u.id))) return false;
+      if (u.suspended) return false;
+      if (u.emailVerified === false) return false;
+      if (u.id && String(u.id).startsWith('seed_') && !scheduler.isSeededUserOnline(String(u.id))) return false;
       return true;
     })
     .map(cleanUserForClient);
 
-  return res.json({ success: true, users: candidates });
+  const shuffled = candidates.sort(() => Math.random() - 0.5).slice(0, 120);
+  return res.json({ success: true, users: shuffled });
 });
 
 app.post('/discover/like', authMiddleware, async (req, res) => {

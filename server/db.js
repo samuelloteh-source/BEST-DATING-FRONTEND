@@ -162,10 +162,19 @@ async function saveUsersToDb(users) {
 
   const ids = [];
   for (const user of normalizedUsers) {
-    const id = String(user.id || user._id || user.email || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    const email = normalizeEmail(user.email);
+    let existingUser = null;
+    if (email) {
+      existingUser = await User.findOne({ email }).lean();
+    }
+
+    const id = existingUser
+      ? String(existingUser._id)
+      : String(user.id || user._id || user.email || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+
     const update = {
       name: user.name || '',
-      email: normalizeEmail(user.email),
+      email,
       passwordHash: user.passwordHash || user.password || '',
       photoUrl: user.photoUrl || user.photo || '',
       ...(user.isVerified !== undefined || user.emailVerified !== undefined ? {
