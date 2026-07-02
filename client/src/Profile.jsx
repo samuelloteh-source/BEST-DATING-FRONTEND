@@ -47,6 +47,11 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
     setSelectedPhoto('')
   }
 
+  const handleQuickAvatarChange = () => {
+    const fileInput = document.getElementById('quick-avatar-input')
+    if (fileInput) fileInput.click()
+  }
+
   const handleImageError = (event) => {
     event.currentTarget.onerror = null
     event.currentTarget.src = '/default-avatar.svg'
@@ -430,14 +435,36 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
                     <h3 className="text-2xl font-semibold text-white">Profile overview</h3>
                     <p className="mt-2 text-sm text-slate-300">Tap the button to edit your profile details.</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowProfileEditor((prev) => !prev)}
-                    className="inline-flex items-center justify-center rounded-3xl bg-gradient-to-r from-pink-500 to-orange-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-pink-500/25 transition hover:scale-[1.01]"
-                  >
-                    {showProfileEditor ? 'Hide profile editor' : 'Edit profile details'}
-                  </button>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <button
+                      type="button"
+                      onClick={handleQuickAvatarChange}
+                      className="inline-flex items-center justify-center rounded-3xl bg-gradient-to-r from-blue-500 to-cyan-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-500/25 transition hover:scale-[1.01]"
+                    >
+                      Change profile picture
+                    </button>
+                    <input
+                      id="quick-avatar-input"
+                      type="file"
+                      accept="image/*"
+                      disabled={avatarUploadLoading}
+                      onChange={handleAvatarFileChange}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowProfileEditor((prev) => !prev)}
+                      className="inline-flex items-center justify-center rounded-3xl bg-gradient-to-r from-pink-500 to-orange-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-pink-500/25 transition hover:scale-[1.01]"
+                    >
+                      {showProfileEditor ? 'Hide profile editor' : 'Edit profile details'}
+                    </button>
+                  </div>
                 </div>
+                {avatarUploadMessage && (
+                  <div className="mt-4 rounded-lg bg-emerald-500/20 border border-emerald-500/50 p-3">
+                    <p className="text-sm text-emerald-300">{avatarUploadMessage}</p>
+                  </div>
+                )}
               </div>
 
               {showProfileEditor && (
