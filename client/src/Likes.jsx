@@ -50,7 +50,7 @@ export default function Likes() {
           {likes.map((item) => (
             <div key={item.id} className="like-card">
               <div className="like-card-image">
-                <img src={resolveImageUrl(item.photo) || 'https://via.placeholder.com/400x300?text=No+Photo'} alt={item.name} />
+                <img src={resolveImageUrl(item.photo)} alt={item.name} onError={(e) => { e.currentTarget.src = '/default-avatar.svg'; }} />
               </div>
               <div className="like-card-body">
                 <div className="like-card-title">{item.name}</div>

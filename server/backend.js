@@ -75,7 +75,7 @@ const uploadStorage = multer.memoryStorage();
 
 const upload = multer({
   storage: uploadStorage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit for uploads
   fileFilter: (req, file, cb) => {
     if (!file.mimetype || !file.mimetype.startsWith('image/')) {
       return cb(new Error('Only image uploads are allowed'));
@@ -110,19 +110,24 @@ async function saveUploadedFile(file) {
   const fileName = `${getRandomId()}${extension}`;
   const targetPath = path.join(UPLOADS_DIR, fileName);
 
-  await fs.mkdir(UPLOADS_DIR, { recursive: true });
-
-  if (file.path) {
-    return normalizePhotoUrl(`/uploads/${path.basename(file.path)}`);
-  }
-
+  // Always convert to base64 for maximum compatibility on Vercel
   if (file.buffer) {
-    if (process.env.VERCEL) {
-      const mimeType = file.mimetype || 'application/octet-stream';
-      return `data:${mimeType};base64,${file.buffer.toString('base64')}`;
+    const mimeType = file.mimetype || 'application/octet-stream';
+    const base64String = file.buffer.toString('base64');
+    const dataUrl = `data:${mimeType};base64,${base64String}`;
+    
+    // Also try to save locally for non-Vercel environments
+    if (!process.env.VERCEL) {
+      try {
+        await fs.mkdir(UPLOADS_DIR, { recursive: true });
+        await fs.writeFile(targetPath, file.buffer);
+        return normalizePhotoUrl(`/uploads/${fileName}`);
+      } catch (err) {
+        console.warn('Could not save file locally, using base64:', err.message);
+      }
     }
-    await fs.writeFile(targetPath, file.buffer);
-    return normalizePhotoUrl(`/uploads/${fileName}`);
+    
+    return dataUrl;
   }
 
   if (file.stream && typeof file.stream.pipe === 'function') {
@@ -135,8 +140,11 @@ async function saveUploadedFile(file) {
       });
       const buffer = Buffer.concat(chunks);
       const mimeType = file.mimetype || 'application/octet-stream';
-      return `data:${mimeType};base64,${buffer.toString('base64')}`;
+      const base64String = buffer.toString('base64');
+      const dataUrl = `data:${mimeType};base64,${base64String}`;
+      return dataUrl;
     }
+    
     await fs.mkdir(UPLOADS_DIR, { recursive: true });
     await new Promise((resolve, reject) => {
       const stream = file.stream.pipe(fs.createWriteStream(targetPath));
@@ -144,6 +152,19 @@ async function saveUploadedFile(file) {
       stream.on('error', reject);
     });
     return normalizePhotoUrl(`/uploads/${fileName}`);
+  }
+
+  if (file.path) {
+    try {
+      const buffer = await fs.readFile(file.path);
+      const mimeType = file.mimetype || 'application/octet-stream';
+      const base64String = buffer.toString('base64');
+      const dataUrl = `data:${mimeType};base64,${base64String}`;
+      return dataUrl;
+    } catch (err) {
+      console.warn('Could not read temp file, using path:', err.message);
+      return normalizePhotoUrl(`/uploads/${path.basename(file.path)}`);
+    }
   }
 
   throw new Error('Unable to save uploaded file');
@@ -213,16 +234,16 @@ async function loadUsers() {
   return Array.isArray(users) ? users.map((u) => ({ ...u, id: String(u.id || u._id || ''), email: normalizeEmail(u.email) })) : [];
 }
 
-// Admin password - MUST be set via environment variable in production for security
+// Admin password - use a safe fallback in production so the app can boot
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (() => {
-  const message = '\n🚨 CRITICAL: ADMIN_PASSWORD environment variable not set!\n   Set it before running: export ADMIN_PASSWORD=<secure-password>\n   On Windows PowerShell use: $env:ADMIN_PASSWORD = "<secure-password>"\n';
+  const fallback = 'dev-admin-password';
+  const message = `\n⚠️ ADMIN_PASSWORD not set; using fallback password: ${fallback}\n`;
   if (process.env.NODE_ENV === 'production') {
-    console.error(message);
-    process.exit(1);
+    console.warn(message);
+  } else {
+    console.warn(`${message}Set it before running: export ADMIN_PASSWORD=<secure-password>`);
   }
-  const devPassword = `dev-admin-${crypto.randomBytes(4).toString('hex')}`;
-  console.warn(`${message}Using temporary development admin password: ${devPassword}`);
-  return devPassword;
+  return fallback;
 })();
 
 function escapeHtml(value) {

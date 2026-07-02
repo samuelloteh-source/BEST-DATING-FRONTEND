@@ -76,8 +76,9 @@ export default function Matches({ user, title = 'Matches', emptyText = 'No match
             >
               <div className="match-image">
                 <img 
-                  src={resolveImageUrl(match.photo) || 'https://via.placeholder.com/150?text=No+Photo'} 
+                  src={resolveImageUrl(match.photo)}
                   alt={match.name}
+                  onError={(e) => { e.currentTarget.src = '/default-avatar.svg'; }}
                 />
                 <div className="match-overlay">
                   <h3>{match.name}</h3>

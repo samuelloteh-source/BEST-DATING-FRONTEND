@@ -678,7 +678,7 @@ function App() {
             <img
               src={resolveImageUrl(user.avatar || user.photo)}
               alt={user.name || 'Profile'}
-              onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = 'https://via.placeholder.com/100x100?text=No+Photo'; }}
+              onError={(event) => { event.currentTarget.src = '/default-avatar.svg'; }}
             />
           ) : 'Profile'}
         </button>

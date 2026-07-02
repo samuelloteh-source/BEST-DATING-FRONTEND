@@ -54,7 +54,7 @@ export default function MessagesList({ user, onSelectMatch, onLogout }) {
               onClick={() => onSelectMatch(thread)}
             >
               <div className="conversation-avatar">
-                <img src={resolveImageUrl(thread.photo) || 'https://via.placeholder.com/80?text=No+Photo'} alt={thread.name} />
+                <img src={resolveImageUrl(thread.photo)} alt={thread.name} onError={(e) => { e.currentTarget.src = '/default-avatar.svg'; }} />
               </div>
               <div className="conversation-details">
                 <div className="conversation-top">

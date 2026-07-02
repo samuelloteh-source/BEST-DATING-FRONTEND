@@ -10,8 +10,10 @@ export const apiBaseUrl = (typeof envApi === 'string' && envApi.length > 0) ? en
 axios.defaults.baseURL = apiBaseUrl
 axios.defaults.withCredentials = false
 
+const DEFAULT_AVATAR = '/default-avatar.svg'
+
 export const resolveImageUrl = (url) => {
-  if (!url) return ''
+  if (!url || (typeof url === 'string' && url.trim().length === 0)) return DEFAULT_AVATAR
   if (typeof url === 'string') {
     const normalized = url.startsWith('uploads/') ? `/${url}` : url
     if (normalized.startsWith('/uploads/')) {
@@ -19,7 +21,7 @@ export const resolveImageUrl = (url) => {
     }
     return normalized
   }
-  return ''
+  return DEFAULT_AVATAR
 }
 
 axios.interceptors.request.use((config) => {

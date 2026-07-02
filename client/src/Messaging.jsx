@@ -57,7 +57,7 @@ export default function Messaging({ user, match, onBack }) {
       <div className="messaging-header">
         <button onClick={onBack} className="back-btn">← Back</button>
         <div className="header-info">
-          <img src={resolveImageUrl(match.photo) || 'https://via.placeholder.com/40'} alt={match.name} />
+          <img src={resolveImageUrl(match.photo)} alt={match.name} onError={(e) => { e.currentTarget.src = '/default-avatar.svg'; }} />
           <h2>{match.name}</h2>
         </div>
       </div>
@@ -73,7 +73,7 @@ export default function Messaging({ user, match, onBack }) {
             >
               <div className="message-bubble">
                 {msg.text && <span>{msg.text}</span>}
-                {msg.photo && <img src={resolveImageUrl(msg.photo)} alt="Sent attachment" />}
+                {msg.photo && <img src={resolveImageUrl(msg.photo)} alt="Sent attachment" onError={(e) => { e.currentTarget.src = '/default-avatar.svg'; }} />}
               </div>
             </div>
           ))

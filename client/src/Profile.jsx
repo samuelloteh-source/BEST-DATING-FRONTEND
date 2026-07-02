@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import axios, { apiBaseUrl } from './api'
+import axios, { apiBaseUrl, resolveImageUrl } from './api'
 import FaceCapture from './FaceCapture'
 
 const interestOptions = [
@@ -34,22 +34,22 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
   const [selfiePreview, setSelfiePreview] = useState('')
   const [avatarUploadLoading, setAvatarUploadLoading] = useState(false)
   const [avatarUploadMessage, setAvatarUploadMessage] = useState('')
+  const [showPhotoModal, setShowPhotoModal] = useState(false)
+  const [selectedPhoto, setSelectedPhoto] = useState('')
 
-  const resolveImageUrl = (url) => {
-    if (!url) return ''
-    if (typeof url === 'string') {
-      const normalized = url.startsWith('uploads/') ? `/${url}` : url
-      if (normalized.startsWith('/uploads/')) {
-        return `${apiBaseUrl}${normalized}`
-      }
-      return normalized
-    }
-    return ''
+  const openPhotoModal = (photoUrl) => {
+    setSelectedPhoto(photoUrl)
+    setShowPhotoModal(true)
+  }
+
+  const closePhotoModal = () => {
+    setShowPhotoModal(false)
+    setSelectedPhoto('')
   }
 
   const handleImageError = (event) => {
     event.currentTarget.onerror = null
-    event.currentTarget.src = 'https://via.placeholder.com/400x400?text=No+Photo'
+    event.currentTarget.src = '/default-avatar.svg'
   }
 
   const handleAvatarFileChange = async (event) => {
@@ -475,7 +475,8 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
                         src={resolveImageUrl(form.avatar)}
                         alt="Profile preview"
                         onError={handleImageError}
-                        className="mt-3 h-32 w-32 rounded-3xl object-cover"
+                        className="mt-3 h-32 w-32 rounded-3xl object-cover cursor-pointer hover:opacity-80 transition"
+                        onClick={() => openPhotoModal(resolveImageUrl(form.avatar))}
                       />
                     </div>
                   )}
@@ -536,8 +537,14 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
                         <div className="rounded-3xl border border-dashed border-white/15 bg-black/40 p-5 text-sm text-slate-400">No gallery photos yet.</div>
                       ) : (
                         gallery.map((image) => (
-                          <div key={image.id} className="relative overflow-hidden rounded-3xl border border-white/10 bg-slate-950">
-                            <img src={resolveImageUrl(image.url)} alt="Gallery" className="h-28 w-full object-cover" onError={handleImageError} />
+                          <div key={image.id} className="relative overflow-hidden rounded-3xl border border-white/10 bg-slate-950 group">
+                            <img 
+                              src={resolveImageUrl(image.url)} 
+                              alt="Gallery" 
+                              className="h-28 w-full object-cover cursor-pointer group-hover:opacity-80 transition"
+                              onError={(e) => { e.currentTarget.src = '/default-avatar.svg'; }}
+                              onClick={() => openPhotoModal(resolveImageUrl(image.url))}
+                            />
                             <button
                               type="button"
                               onClick={() => handleDeleteGalleryImage(image.id)}
@@ -609,7 +616,8 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
                         src={resolveImageUrl(user.avatar || user.photo)}
                         alt="Profile"
                         onError={handleImageError}
-                        className="h-48 w-full rounded-3xl object-cover"
+                        className="h-48 w-full rounded-3xl object-cover cursor-pointer hover:opacity-80 transition"
+                        onClick={() => openPhotoModal(resolveImageUrl(user.avatar || user.photo))}
                       />
                     ) : (
                       <div className="h-48 rounded-3xl border border-dashed border-white/15 bg-white/5 flex items-center justify-center text-slate-400">No profile image set</div>
@@ -836,6 +844,34 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
           )}
         </div>
       </div>
+
+      {/* Photo Modal */}
+      {showPhotoModal && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+          onClick={closePhotoModal}
+        >
+          <div 
+            className="relative max-w-2xl w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={selectedPhoto}
+              alt="Profile photo"
+              className="w-full rounded-2xl object-cover"
+            />
+            <button
+              onClick={closePhotoModal}
+              className="absolute top-4 right-4 rounded-full bg-black/70 p-2 text-white hover:bg-black transition"
+              title="Close"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

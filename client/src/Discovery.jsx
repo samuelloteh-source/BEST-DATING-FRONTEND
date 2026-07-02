@@ -346,7 +346,7 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
     const profileImage = resolveImageUrl(
       (profile.gallery && profile.gallery.length > 0 && profile.gallery[0].url)
       || profile.photo
-    ) || 'https://via.placeholder.com/300x400?text=No+Photo';
+    );
 
     const cardClassName = isTopCard ? 'discovery-card top-card' : 'discovery-card stack-card';
     const stackStyle = isTopCard
@@ -368,7 +368,7 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
         style={isTopCard ? { ...stackStyle, zIndex: 3 } : { ...stackStyle, zIndex: 3 - index }}
       >
         <div className="card-image">
-          <img src={profileImage} alt={profile.name} />
+          <img src={profileImage} alt={profile.name} onError={(e) => { e.currentTarget.src = '/default-avatar.svg'; }} />
           <div className="card-overlay">
             <h2>{profile.name}, {profile.dob ? new Date().getFullYear() - new Date(profile.dob).getFullYear() : '?'}</h2>
             <p className="location">{profile.state || profile.city}, {profile.country}</p>
@@ -464,7 +464,7 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
           <div className="profile-modal" onClick={(event) => event.stopPropagation()}>
             <button type="button" className="modal-close-btn" onClick={closeProfileDetails}>×</button>
             <div className="profile-modal-image">
-              <img src={resolveImageUrl((selectedProfile.gallery && selectedProfile.gallery.length > 0 && selectedProfile.gallery[0].url) || selectedProfile.photo) || 'https://via.placeholder.com/500x500?text=No+Photo'} alt={selectedProfile.name} />
+              <img src={resolveImageUrl((selectedProfile.gallery && selectedProfile.gallery.length > 0 && selectedProfile.gallery[0].url) || selectedProfile.photo)} alt={selectedProfile.name} onError={(e) => { e.currentTarget.src = '/default-avatar.svg'; }} />
             </div>
             {selectedProfile.gallery && selectedProfile.gallery.length > 1 && (
               <div className="gallery-thumbnails">
