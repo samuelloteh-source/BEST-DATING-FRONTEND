@@ -95,6 +95,7 @@ function normalizeUserRecord(user) {
     id: user._id ? String(user._id) : String(user.id || ''),
     password: user.password || user.passwordHash || '',
     photo: user.photo || user.photoUrl || '',
+    avatar: user.avatar || user.photo || user.photoUrl || '',
     emailVerified: user.isVerified !== undefined
       ? user.isVerified
       : user.emailVerified !== undefined
@@ -338,6 +339,8 @@ async function saveUsersToDb(users) {
         email,
         passwordHash,
         photoUrl: user.photoUrl || user.photo || '',
+        photo: user.photo || user.photoUrl || '',
+        avatar: user.avatar || user.photo || user.photoUrl || '',
         ...(verifiedValue !== undefined ? {
           isVerified: verifiedValue,
           emailVerified: verifiedValue

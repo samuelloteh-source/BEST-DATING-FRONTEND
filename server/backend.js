@@ -1231,12 +1231,12 @@ app.post('/api/user/avatar', authMiddleware, upload.single('avatar'), async (req
     }
 
     const avatarUrl = await saveUploadedFile(req.file);
+    console.log(`Avatar uploaded for user ${req.userId}: ${avatarUrl.substring(0, 50)}...`);
     currentUser.avatar = avatarUrl;
-    if (!currentUser.photo) {
-      currentUser.photo = avatarUrl;
-    }
+    currentUser.photo = avatarUrl;  // Ensure photo matches avatar for consistency
     currentUser.updatedAt = Date.now();
     await saveUsers(users);
+    console.log(`Avatar saved to database for user ${req.userId}`);
 
     return res.json({ success: true, user: cleanUserForClient(currentUser), avatar: avatarUrl });
   } catch (err) {
