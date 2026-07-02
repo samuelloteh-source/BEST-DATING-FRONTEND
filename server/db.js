@@ -30,6 +30,8 @@ const LOCAL_USERS_FILE = path.join(DATA_DIR, 'users.json');
 const LOCAL_SYNC_INTERVAL_MS = 60 * 1000; // sync at most once per minute
 
 let dbConnected = false;
+let dbInitPromise = null;
+let dbMode = 'file';
 const useMongo = Boolean(MONGO_URI);
 
 function normalizeEmail(email) {
@@ -38,34 +40,48 @@ function normalizeEmail(email) {
 
 async function initDb() {
   if (dbConnected) return;
-  if (!useMongo) {
-    // Ensure writable temp storage exists for file-based storage in serverless environments
-    await fs.promises.mkdir(DATA_DIR, { recursive: true });
-    if (process.env.VERCEL) {
-      try {
-        const targetUsersFile = path.join(DATA_DIR, 'users.json');
-        if (!fs.existsSync(targetUsersFile) && fs.existsSync(REPO_USERS_FILE)) {
-          await fs.promises.copyFile(REPO_USERS_FILE, targetUsersFile);
-          console.log('Copied seeded users file to writable temp storage');
-        }
-      } catch (copyErr) {
-        console.warn('Unable to copy seeded data to temp storage:', copyErr.message || copyErr);
-      }
-    }
-    dbConnected = true;
-    console.log('DB using file-based storage at', DATA_DIR);
-    return;
-  }
+  if (dbInitPromise) return dbInitPromise;
 
-  // Connect to MongoDB when MONGO_URI is provided
-  await mongoose.connect(MONGO_URI, {
-    tls: true,
-    ssl: true,
-    connectTimeoutMS: 10000,
-    serverSelectionTimeoutMS: 10000,
-  });
-  dbConnected = true;
-  console.log('Mongo Connected');
+  dbInitPromise = (async () => {
+    if (!useMongo) {
+      // Ensure writable temp storage exists for file-based storage in serverless environments
+      await fs.promises.mkdir(DATA_DIR, { recursive: true });
+      if (process.env.VERCEL) {
+        try {
+          const targetUsersFile = path.join(DATA_DIR, 'users.json');
+          if (!fs.existsSync(targetUsersFile) && fs.existsSync(REPO_USERS_FILE)) {
+            await fs.promises.copyFile(REPO_USERS_FILE, targetUsersFile);
+            console.log('Copied seeded users file to writable temp storage');
+          }
+        } catch (copyErr) {
+          console.warn('Unable to copy seeded data to temp storage:', copyErr.message || copyErr);
+        }
+      }
+      dbMode = 'file';
+      dbConnected = true;
+      console.log('DB using file-based storage at', DATA_DIR);
+      return;
+    }
+
+    try {
+      // Connect to MongoDB when MONGO_URI is provided
+      await mongoose.connect(MONGO_URI, {
+        tls: true,
+        ssl: true,
+        connectTimeoutMS: 10000,
+        serverSelectionTimeoutMS: 10000,
+      });
+      dbMode = 'mongodb';
+      dbConnected = true;
+      console.log('Mongo Connected');
+    } catch (err) {
+      console.warn('Mongo unavailable, falling back to file-based storage:', err && err.message ? err.message : err);
+      dbMode = 'file';
+      dbConnected = true;
+    }
+  })();
+
+  return dbInitPromise;
 }
 
 mongoose.connection.on('error', (err) => {
@@ -243,7 +259,7 @@ async function syncLocalUsersToMongoIfNeeded() {
 
 async function loadUsersFromDb() {
   await initDb();
-  if (!useMongo) {
+  if (dbMode !== 'mongodb') {
     const usersFile = path.join(DATA_DIR, 'users.json');
     try {
       const contents = await fs.promises.readFile(usersFile, 'utf8');
@@ -256,16 +272,30 @@ async function loadUsersFromDb() {
     }
   }
 
-  await syncLocalUsersToMongoIfNeeded();
-  const users = await User.find().lean();
-  const normalized = users.map(normalizeUserRecord);
-  return await ensureRepoSeedUsers(normalized);
+  try {
+    await syncLocalUsersToMongoIfNeeded();
+    const users = await User.find().lean();
+    const normalized = users.map(normalizeUserRecord);
+    return await ensureRepoSeedUsers(normalized);
+  } catch (err) {
+    console.warn('Mongo user load failed, falling back to file-based storage:', err && err.message ? err.message : err);
+    const usersFile = path.join(DATA_DIR, 'users.json');
+    try {
+      const contents = await fs.promises.readFile(usersFile, 'utf8');
+      const users = JSON.parse(contents);
+      const normalizedUsers = Array.isArray(users) ? users.map(normalizeUserRecord) : [];
+      return await ensureRepoSeedUsers(normalizedUsers);
+    } catch (fileErr) {
+      if (fileErr.code === 'ENOENT') return [];
+      throw fileErr;
+    }
+  }
 }
 
 async function saveUsersToDb(users) {
   await initDb();
   const normalizedUsers = Array.isArray(users) ? users.filter(Boolean).map(normalizeUserRecord) : [];
-  if (!useMongo) {
+  if (dbMode !== 'mongodb') {
     const usersFile = path.join(DATA_DIR, 'users.json');
     const mergedUsers = await ensureRepoSeedUsers(normalizedUsers);
     await fs.promises.mkdir(DATA_DIR, { recursive: true });
@@ -273,82 +303,90 @@ async function saveUsersToDb(users) {
     return;
   }
 
-  const ids = [];
-  for (const user of normalizedUsers) {
-    const email = normalizeEmail(user.email);
-    let existingUser = null;
-    if (email) {
-      existingUser = await User.findOne({ email }).lean();
+  try {
+    const ids = [];
+    for (const user of normalizedUsers) {
+      const email = normalizeEmail(user.email);
+      let existingUser = null;
+      if (email) {
+        existingUser = await User.findOne({ email }).lean();
+      }
+
+      const id = existingUser
+        ? String(existingUser._id)
+        : String(user.id || user._id || user.email || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+
+      let passwordHash = '';
+      if (user.passwordHash) {
+        passwordHash = user.passwordHash;
+      } else if (user.password && isBcryptHash(user.password)) {
+        passwordHash = user.password;
+      } else if (user.password) {
+        passwordHash = await bcrypt.hash(user.password, 10);
+      } else if (existingUser && existingUser.passwordHash) {
+        passwordHash = existingUser.passwordHash;
+      }
+
+      const verifiedValue = user.isVerified !== undefined
+        ? user.isVerified
+        : user.emailVerified !== undefined
+          ? Boolean(user.emailVerified)
+          : undefined;
+
+      const update = {
+        name: user.name || '',
+        email,
+        passwordHash,
+        photoUrl: user.photoUrl || user.photo || '',
+        ...(verifiedValue !== undefined ? {
+          isVerified: verifiedValue,
+          emailVerified: verifiedValue
+        } : {}),
+        authToken: user.authToken,
+        authTokenExpires: user.authTokenExpires,
+        sessionVersion: typeof user.sessionVersion === 'number' ? user.sessionVersion : Number(user.sessionVersion || 0),
+        emailVerificationToken: user.emailVerificationToken || user.verificationToken,
+        verificationToken: user.verificationToken || user.emailVerificationToken,
+        passwordResetToken: user.passwordResetToken,
+        passwordResetExpires: user.passwordResetExpires,
+        suspended: !!user.suspended,
+        dob: user.dob || '',
+        gender: user.gender || '',
+        country: user.country || '',
+        state: user.state || '',
+        bio: user.bio || '',
+        interests: Array.isArray(user.interests) ? user.interests : [],
+        lookingFor: user.lookingFor || 'Any',
+        likes: Array.isArray(user.likes) ? user.likes : [],
+        messages: Array.isArray(user.messages) ? user.messages : [],
+        gallery: Array.isArray(user.gallery) ? user.gallery : [],
+        notifications: Array.isArray(user.notifications) ? user.notifications : [],
+        matches: Array.isArray(user.matches) ? user.matches : [],
+        passed: Array.isArray(user.passed) ? user.passed : [],
+        updatedAt: user.updatedAt || Date.now(),
+        createdAt: user.createdAt || Date.now(),
+      };
+
+      const doc = await User.findOneAndUpdate(
+        { _id: id },
+        { $set: update },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      ).lean();
+
+      ids.push(String(doc._id));
     }
 
-    const id = existingUser
-      ? String(existingUser._id)
-      : String(user.id || user._id || user.email || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-
-    let passwordHash = '';
-    if (user.passwordHash) {
-      passwordHash = user.passwordHash;
-    } else if (user.password && isBcryptHash(user.password)) {
-      passwordHash = user.password;
-    } else if (user.password) {
-      passwordHash = await bcrypt.hash(user.password, 10);
-    } else if (existingUser && existingUser.passwordHash) {
-      passwordHash = existingUser.passwordHash;
+    if (ids.length === 0) {
+      await User.deleteMany({});
+    } else {
+      await User.deleteMany({ _id: { $nin: ids } });
     }
-
-    const verifiedValue = user.isVerified !== undefined
-      ? user.isVerified
-      : user.emailVerified !== undefined
-        ? Boolean(user.emailVerified)
-        : undefined;
-
-    const update = {
-      name: user.name || '',
-      email,
-      passwordHash,
-      photoUrl: user.photoUrl || user.photo || '',
-      ...(verifiedValue !== undefined ? {
-        isVerified: verifiedValue,
-        emailVerified: verifiedValue
-      } : {}),
-      authToken: user.authToken,
-      authTokenExpires: user.authTokenExpires,
-      sessionVersion: typeof user.sessionVersion === 'number' ? user.sessionVersion : Number(user.sessionVersion || 0),
-      emailVerificationToken: user.emailVerificationToken || user.verificationToken,
-      verificationToken: user.verificationToken || user.emailVerificationToken,
-      passwordResetToken: user.passwordResetToken,
-      passwordResetExpires: user.passwordResetExpires,
-      suspended: !!user.suspended,
-      dob: user.dob || '',
-      gender: user.gender || '',
-      country: user.country || '',
-      state: user.state || '',
-      bio: user.bio || '',
-      interests: Array.isArray(user.interests) ? user.interests : [],
-      lookingFor: user.lookingFor || 'Any',
-      likes: Array.isArray(user.likes) ? user.likes : [],
-      messages: Array.isArray(user.messages) ? user.messages : [],
-      gallery: Array.isArray(user.gallery) ? user.gallery : [],
-      notifications: Array.isArray(user.notifications) ? user.notifications : [],
-      matches: Array.isArray(user.matches) ? user.matches : [],
-      passed: Array.isArray(user.passed) ? user.passed : [],
-      updatedAt: user.updatedAt || Date.now(),
-      createdAt: user.createdAt || Date.now(),
-    };
-
-    const doc = await User.findOneAndUpdate(
-      { _id: id },
-      { $set: update },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    ).lean();
-
-    ids.push(String(doc._id));
-  }
-
-  if (ids.length === 0) {
-    await User.deleteMany({});
-  } else {
-    await User.deleteMany({ _id: { $nin: ids } });
+  } catch (err) {
+    console.warn('Mongo user save failed, falling back to file-based storage:', err && err.message ? err.message : err);
+    const usersFile = path.join(DATA_DIR, 'users.json');
+    const mergedUsers = await ensureRepoSeedUsers(normalizedUsers);
+    await fs.promises.mkdir(DATA_DIR, { recursive: true });
+    await fs.promises.writeFile(usersFile, JSON.stringify(mergedUsers, null, 2), 'utf8');
   }
 }
 
