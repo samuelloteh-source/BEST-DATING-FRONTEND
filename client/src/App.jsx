@@ -674,7 +674,13 @@ function App() {
           onClick={() => navigateAppPage('profile')}
           title="Profile"
         >
-          {user && user.avatar ? <img src={resolveImageUrl(user.avatar)} alt={user.name || 'Profile'} /> : 'Profile'}
+          {user && (user.avatar || user.photo) ? (
+            <img
+              src={resolveImageUrl(user.avatar || user.photo)}
+              alt={user.name || 'Profile'}
+              onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = 'https://via.placeholder.com/100x100?text=No+Photo'; }}
+            />
+          ) : 'Profile'}
         </button>
       </div>
         {currentPage === 'discover' && (

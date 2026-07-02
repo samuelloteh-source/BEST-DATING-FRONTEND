@@ -11,23 +11,26 @@ const DEFAULT_FILTERS = {
   interests: []
 };
 
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
 export default function Discovery({ user, onMatch, showHeader = true, filters, onDirectMessage }) {
   const [users, setUsers] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [dragState, setDragState] = useState({ active: false, startX: 0, startY: 0, offsetX: 0, offsetY: 0, isSwiping: false });
+  const [swipeOutcome, setSwipeOutcome] = useState(null);
   const [userOnlineStatus, setUserOnlineStatus] = useState({});
   const [selectedProfile, setSelectedProfile] = useState(null);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const socketRef = useRef(null);
-  const cardRef = useRef(null);
-  const swipeThreshold = 100;
+  const swipeTimeoutRef = useRef(null);
 
   useEffect(() => {
     fetchDiscoverUsers();
-    
-    // Initialize Socket.io connection
+
     const socket = io(apiBaseUrl, { transports: ['websocket'] });
     socketRef.current = socket;
 
@@ -44,7 +47,7 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
 
     socket.on('status_check_response', (statuses) => {
       const statusMap = {};
-      statuses.forEach(status => {
+      statuses.forEach((status) => {
         statusMap[status.userId] = status.isOnline;
       });
       setUserOnlineStatus(statusMap);
@@ -52,6 +55,7 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
 
     return () => {
       if (socket) socket.disconnect();
+      if (swipeTimeoutRef.current) window.clearTimeout(swipeTimeoutRef.current);
     };
   }, []);
 
@@ -69,39 +73,62 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
     }
   };
 
+  const vibrate = (pattern) => {
+    if (typeof window !== 'undefined' && navigator.vibrate) {
+      navigator.vibrate(pattern);
+    }
+  };
+
+  const playFeedback = (type) => {
+    if (typeof window === 'undefined') return;
+    if (type === 'like') vibrate(10);
+    if (type === 'pass') vibrate(12);
+    if (type === 'superlike') vibrate([12, 18, 24]);
+  };
+
   const handleLike = async () => {
     if (!currentUser) return;
+    const targetId = currentUser.id;
+    moveToNextCard();
+    resetDrag();
+
     try {
-      const response = await axios.post('/discover/like', { targetId: currentUser.id });
+      const response = await axios.post('/discover/like', { targetId });
       if (response.data.isMatch) {
         setMessage('🎉 It\'s a match!');
         if (typeof onMatch === 'function') onMatch();
         setTimeout(() => setMessage(''), 3000);
       }
-      moveToNextCard();
     } catch (err) {
       console.error('Failed to like:', err);
-    } finally {
-      resetDrag();
+      setMessage('Could not record your like. Please try again.');
+      setTimeout(() => setMessage(''), 3000);
     }
   };
 
   const handlePass = async () => {
     if (!currentUser) return;
+    const targetId = currentUser.id;
+    moveToNextCard();
+    resetDrag();
+
     try {
-      await axios.post('/discover/pass', { targetId: currentUser.id });
-      moveToNextCard();
+      await axios.post('/discover/pass', { targetId });
     } catch (err) {
       console.error('Failed to pass:', err);
-    } finally {
-      resetDrag();
+      setMessage('Could not record your pass. Please try again.');
+      setTimeout(() => setMessage(''), 3000);
     }
   };
 
   const handleSuperLike = async () => {
     if (!currentUser) return;
+    const targetId = currentUser.id;
+    moveToNextCard();
+    resetDrag();
+
     try {
-      const response = await axios.post('/discover/superlike', { targetId: currentUser.id });
+      const response = await axios.post('/discover/superlike', { targetId });
       if (response.data.isMatch) {
         setMessage('✨ Super like and match!');
         if (typeof onMatch === 'function') onMatch();
@@ -109,15 +136,36 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
         setMessage('✨ Super like sent!');
       }
       setTimeout(() => setMessage(''), 3000);
-      moveToNextCard();
     } catch (err) {
       console.error('Failed to super like:', err);
-    } finally {
-      resetDrag();
+      setMessage('Could not record your super like. Please try again.');
+      setTimeout(() => setMessage(''), 3000);
     }
   };
 
-  const interestOptions = ['Travel', 'Cooking', 'Music', 'Fitness', 'Movies', 'Reading', 'Art & Culture', 'Swimming', 'Hiking', 'Gym & Fitness', 'Sports', 'Foodie', 'Nature', 'Tech'];
+  const triggerSwipeAction = (direction, action) => {
+    const width = window.innerWidth || 375;
+    const height = window.innerHeight || 700;
+
+    let outcome = { x: 0, y: 0, rotate: 0, scale: 1 };
+    if (direction === 'like') {
+      outcome = { x: width * 1.2, y: -18, rotate: 16, scale: 1 };
+      playFeedback('like');
+    } else if (direction === 'pass') {
+      outcome = { x: -width * 1.2, y: 12, rotate: -16, scale: 1 };
+      playFeedback('pass');
+    } else if (direction === 'superlike') {
+      outcome = { x: 0, y: -height * 1.05, rotate: 0, scale: 0.95 };
+      playFeedback('superlike');
+    }
+
+    setSwipeOutcome(outcome);
+    if (swipeTimeoutRef.current) window.clearTimeout(swipeTimeoutRef.current);
+    swipeTimeoutRef.current = window.setTimeout(() => {
+      setSwipeOutcome(null);
+      action();
+    }, 220);
+  };
 
   const ageFromDob = (dob) => {
     if (!dob) return 0;
@@ -155,6 +203,7 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
   }, [filteredUsers, currentIndex]);
 
   const currentUser = filteredUsers[currentIndex];
+  const stackUsers = filteredUsers.slice(currentIndex, currentIndex + 3);
 
   const currentUserImage = resolveImageUrl(
     (currentUser?.gallery && currentUser.gallery.length > 0 && currentUser.gallery[0].url)
@@ -187,7 +236,9 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
       const offsetY = clientY - prev.startY;
       const absX = Math.abs(offsetX);
       const absY = Math.abs(offsetY);
-      const isSwiping = prev.isSwiping || (absX > absY && absX > 10);
+      const isHorizontal = absX > absY + 8 && absX > 12;
+      const isVerticalUp = absY > absX + 8 && absY > 12 && offsetY < 0;
+      const isSwiping = prev.isSwiping || isHorizontal || isVerticalUp;
 
       if (!isSwiping) {
         if (absY > absX && absY > 10) {
@@ -197,26 +248,40 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
       }
 
       event.preventDefault();
-      return { ...prev, offsetX, offsetY, isSwiping };
+      if (isVerticalUp) {
+        return { ...prev, offsetX: offsetX * 0.2, offsetY, isSwiping: true };
+      }
+      return { ...prev, offsetX, offsetY, isSwiping: true };
     });
   };
 
   const handlePointerUp = () => {
     if (!dragState.active) return;
-    if (dragState.isSwiping && Math.abs(dragState.offsetX) > swipeThreshold) {
-      if (dragState.offsetX > 0) {
-        handleLike();
+
+    const width = window.innerWidth || 375;
+    const height = window.innerHeight || 700;
+    const thresholdX = Math.max(90, width * 0.3);
+    const thresholdY = Math.max(110, height * 0.35);
+
+    if (dragState.isSwiping) {
+      if (dragState.offsetY < -thresholdY && Math.abs(dragState.offsetY) > Math.abs(dragState.offsetX) * 1.1) {
+        triggerSwipeAction('superlike', handleSuperLike);
+      } else if (dragState.offsetX > thresholdX) {
+        triggerSwipeAction('like', handleLike);
+      } else if (dragState.offsetX < -thresholdX) {
+        triggerSwipeAction('pass', handlePass);
       } else {
-        handlePass();
+        resetDrag();
       }
-    } else {
-      resetDrag();
+      return;
     }
+
+    resetDrag();
   };
 
   const moveToNextCard = () => {
     if (currentIndex < filteredUsers.length - 1) {
-      setCurrentIndex(currentIndex + 1);
+      setCurrentIndex((prev) => prev + 1);
     } else {
       setMessage('No more users to discover');
       setTimeout(() => fetchDiscoverUsers(), 2000);
@@ -246,9 +311,132 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
     );
   }
 
-  const cardTransform = {
-    transform: `translateX(${dragState.isSwiping ? dragState.offsetX : 0}px) rotate(${dragState.offsetX / 20}deg)`,
-    transition: dragState.active ? 'none' : 'transform 0.25s ease',
+  const topCardStyle = () => {
+    const dragX = dragState.isSwiping ? dragState.offsetX : 0;
+    const dragY = dragState.isSwiping ? dragState.offsetY : 0;
+    const rotation = dragState.isSwiping ? clamp(dragX / 18, -15, 15) : 0;
+    const scale = dragState.isSwiping && dragY < -20 ? 0.95 : 1;
+
+    if (swipeOutcome) {
+      return {
+        transform: `translate(${swipeOutcome.x}px, ${swipeOutcome.y}px) rotate(${swipeOutcome.rotate}deg) scale(${swipeOutcome.scale})`,
+        transition: 'transform 220ms cubic-bezier(0.2, 0.85, 0.3, 1)',
+        boxShadow: '0 34px 90px rgba(0, 0, 0, 0.42)'
+      };
+    }
+
+    const shadowIntensity = clamp((Math.abs(dragX) + Math.abs(dragY)) / 220, 0, 1);
+    return {
+      transform: `translate(${dragX}px, ${dragY}px) rotate(${rotation}deg) scale(${scale})`,
+      transition: dragState.active ? 'none' : 'transform 280ms cubic-bezier(0.22, 1, 0.36, 1)',
+      boxShadow: `0 ${28 + shadowIntensity * 24}px ${82 + shadowIntensity * 26}px rgba(0, 0, 0, ${0.35 + shadowIntensity * 0.16})`
+    };
+  };
+
+  const likeBadgeOpacity = dragState.isSwiping ? clamp(Math.abs(dragState.offsetX) / 140, 0.1, 1) : 0;
+  const passBadgeOpacity = dragState.isSwiping ? clamp(Math.abs(dragState.offsetX) / 140, 0.1, 1) : 0;
+  const superBadgeOpacity = dragState.isSwiping ? clamp(Math.abs(dragState.offsetY) / 160, 0.1, 1) : 0;
+  const showLikeBadge = dragState.isSwiping && dragState.offsetX > 20;
+  const showPassBadge = dragState.isSwiping && dragState.offsetX < -20;
+  const showSuperBadge = dragState.isSwiping && dragState.offsetY < -20 && Math.abs(dragState.offsetY) > Math.abs(dragState.offsetX);
+
+  const renderProfileCard = (profile, isTopCard = false, index = 0) => {
+    if (!profile) return null;
+
+    const profileImage = resolveImageUrl(
+      (profile.gallery && profile.gallery.length > 0 && profile.gallery[0].url)
+      || profile.photo
+    ) || 'https://via.placeholder.com/300x400?text=No+Photo';
+
+    const cardClassName = isTopCard ? 'discovery-card top-card' : 'discovery-card stack-card';
+    const stackStyle = isTopCard
+      ? topCardStyle()
+      : {
+          transform: `translateY(${16 + index * 12}px) scale(${1 - index * 0.04})`,
+          opacity: 1 - index * 0.08,
+          transition: 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms ease'
+        };
+
+    return (
+      <div
+        key={profile.id || `${profile.email}-${index}`}
+        className={cardClassName}
+        onPointerDown={isTopCard ? handlePointerDown : undefined}
+        onPointerMove={isTopCard ? handlePointerMove : undefined}
+        onPointerUp={isTopCard ? handlePointerUp : undefined}
+        onPointerCancel={isTopCard ? handlePointerUp : undefined}
+        style={isTopCard ? { ...stackStyle, zIndex: 3 } : { ...stackStyle, zIndex: 3 - index }}
+      >
+        <div className="card-image">
+          <img src={profileImage} alt={profile.name} />
+          <div className="card-overlay">
+            <h2>{profile.name}, {profile.dob ? new Date().getFullYear() - new Date(profile.dob).getFullYear() : '?'}</h2>
+            <p className="location">{profile.state || profile.city}, {profile.country}</p>
+            {profile.id && profile.id.startsWith('seed_') && (
+              <div className="online-badge">
+                <div className={`online-dot ${userOnlineStatus[profile.id] ? 'online' : 'offline'}`}></div>
+                <span>{userOnlineStatus[profile.id] ? 'Online' : 'Offline'}</span>
+              </div>
+            )}
+            {profile.gallery && profile.gallery.length > 1 && (
+              <div className="photo-count-badge">
+                <span>{profile.gallery.length} photos</span>
+              </div>
+            )}
+          </div>
+          {isTopCard && (
+            <>
+              {showLikeBadge && (
+                <div className="swipe-badge swipe-badge-like" style={{ opacity: likeBadgeOpacity }}>
+                  LIKE
+                </div>
+              )}
+              {showPassBadge && (
+                <div className="swipe-badge swipe-badge-pass" style={{ opacity: passBadgeOpacity }}>
+                  NOPE
+                </div>
+              )}
+              {showSuperBadge && (
+                <div className="swipe-badge swipe-badge-super" style={{ opacity: superBadgeOpacity }}>
+                  SUPER LIKE
+                </div>
+              )}
+            </>
+          )}
+          {isTopCard && (
+            <div className="card-actions-overlay">
+              <button onClick={() => triggerSwipeAction('pass', handlePass)} className="pass-btn">
+                <span>✕</span>
+              </button>
+              <button onClick={() => triggerSwipeAction('superlike', handleSuperLike)} className="superlike-btn">
+                <span>★</span>
+              </button>
+              <button onClick={() => triggerSwipeAction('like', handleLike)} className="like-btn">
+                <span>♥</span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="card-info">
+          <p className="bio">
+            {profile.bio
+              ? `${profile.bio.slice(0, 100)}${profile.bio.length > 100 ? '...' : ''}`
+              : 'No bio provided'}
+          </p>
+          {profile.interests && profile.interests.length > 0 && (
+            <p className="profile-summary">
+              Interests: {profile.interests.slice(0, 3).join(', ')}{profile.interests.length > 3 ? ` +${profile.interests.length - 3}` : ''}
+            </p>
+          )}
+          {isTopCard && (
+            <button type="button" className="view-profile-btn card-info-btn" onClick={() => openProfileDetails(profile)}>
+              View full profile
+            </button>
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -268,64 +456,7 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
       {message && <div className="match-message">{message}</div>}
 
       <div className="card-stack">
-        <div
-          className={`discovery-card ${dragState.active ? 'dragging' : ''}`}
-          ref={cardRef}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          style={cardTransform}
-        >
-          <div className="card-image">
-            <img 
-              src={currentUserImage}
-              alt={currentUser.name}
-            />
-            <div className="card-overlay">
-              <h2>{currentUser.name}, {currentUser.dob ? new Date().getFullYear() - new Date(currentUser.dob).getFullYear() : '?'}</h2>
-              <p className="location">{currentUser.state || currentUser.city}, {currentUser.country}</p>
-              {currentUser.id && currentUser.id.startsWith('seed_') && (
-                <div className="online-badge">
-                  <div className={`online-dot ${userOnlineStatus[currentUser.id] ? 'online' : 'offline'}`}></div>
-                  <span>{userOnlineStatus[currentUser.id] ? 'Online' : 'Offline'}</span>
-                </div>
-              )}
-              {currentUser.gallery && currentUser.gallery.length > 1 && (
-                <div className="photo-count-badge">
-                  <span>{currentUser.gallery.length} photos</span>
-                </div>
-              )}
-            </div>
-            <div className="card-actions-overlay">
-              <button onClick={handlePass} className="pass-btn">
-                <span>✕</span>
-              </button>
-              <button onClick={handleSuperLike} className="superlike-btn">
-                <span>★</span>
-              </button>
-              <button onClick={handleLike} className="like-btn">
-                <span>♥</span>
-              </button>
-            </div>
-          </div>
-          
-          <div className="card-info">
-            <p className="bio">
-              {currentUser.bio
-                ? `${currentUser.bio.slice(0, 100)}${currentUser.bio.length > 100 ? '...' : ''}`
-                : 'No bio provided'}
-            </p>
-            {currentUser.interests && currentUser.interests.length > 0 && (
-              <p className="profile-summary">
-                Interests: {currentUser.interests.slice(0, 3).join(', ')}{currentUser.interests.length > 3 ? ` +${currentUser.interests.length - 3}` : ''}
-              </p>
-            )}
-            <button type="button" className="view-profile-btn card-info-btn" onClick={() => openProfileDetails(currentUser)}>
-              View full profile
-            </button>
-          </div>
-        </div>
+        {stackUsers.map((profile, index) => renderProfileCard(profile, index === 0, index))}
       </div>
 
       {profileModalOpen && selectedProfile && (

@@ -32,13 +32,54 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
   const [faceVerificationDone, setFaceVerificationDone] = useState(false)
   const [selfieFile, setSelfieFile] = useState(null)
   const [selfiePreview, setSelfiePreview] = useState('')
+  const [avatarUploadLoading, setAvatarUploadLoading] = useState(false)
+  const [avatarUploadMessage, setAvatarUploadMessage] = useState('')
 
   const resolveImageUrl = (url) => {
     if (!url) return ''
-    if (typeof url === 'string' && url.startsWith('/uploads/')) {
-      return `${apiBaseUrl}${url}`
+    if (typeof url === 'string') {
+      const normalized = url.startsWith('uploads/') ? `/${url}` : url
+      if (normalized.startsWith('/uploads/')) {
+        return `${apiBaseUrl}${normalized}`
+      }
+      return normalized
     }
-    return url
+    return ''
+  }
+
+  const handleImageError = (event) => {
+    event.currentTarget.onerror = null
+    event.currentTarget.src = 'https://via.placeholder.com/400x400?text=No+Photo'
+  }
+
+  const handleAvatarFileChange = async (event) => {
+    const file = event.target.files?.[0] || null
+    if (!file) return
+
+    setAvatarUploadMessage('')
+    setAvatarUploadLoading(true)
+
+    try {
+      const formData = new FormData()
+      formData.append('avatar', file)
+      const res = await axios.post('/api/user/avatar', formData)
+      if (res.data?.success) {
+        const updated = res.data.user
+        setForm((prev) => ({ ...prev, avatar: updated.avatar || updated.photo || '' }))
+        if (typeof onUpdateUser === 'function') {
+          onUpdateUser(updated)
+        }
+        setAvatarUploadMessage('Profile picture updated successfully.')
+      } else {
+        setAvatarUploadMessage(res.data?.message || 'Unable to upload profile picture.')
+      }
+    } catch (err) {
+      console.error('Avatar upload failed:', err)
+      setAvatarUploadMessage('Could not upload profile picture. Please try again.')
+    } finally {
+      setAvatarUploadLoading(false)
+      event.target.value = null
+    }
   }
 
   useEffect(() => {
@@ -240,7 +281,6 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
     try {
       const payload = {
         name: form.name,
-        avatar: form.avatar,
         bio: form.bio,
         interests: form.interests
       }
@@ -405,25 +445,40 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
                   <h3 className="text-2xl font-semibold text-white">Profile details</h3>
                   <div className="mt-6 grid gap-5 sm:grid-cols-2">
                     <label className="space-y-2 text-sm text-slate-300">
-                      <span>Name</span>
+                      <div className="flex items-center justify-between">
+                        <span>Name</span>
+                        <span className="text-xs text-slate-500">Cannot change name</span>
+                      </div>
                       <input
                         value={form.name}
-                        onChange={(e) => handleFormChange('name', e.target.value)}
-                        className="w-full rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-pink-400"
+                        disabled
+                        className="w-full rounded-3xl border border-white/10 bg-slate-900/80 px-4 py-3 text-slate-400 outline-none cursor-not-allowed"
                         placeholder="Your full name"
-                        required
                       />
                     </label>
                     <label className="space-y-2 text-sm text-slate-300">
-                      <span>Avatar URL</span>
+                      <span>Change profile picture</span>
                       <input
-                        value={form.avatar}
-                        onChange={(e) => handleFormChange('avatar', e.target.value)}
-                        className="w-full rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-pink-400"
-                        placeholder="https://"
+                        type="file"
+                        accept="image/*"
+                        disabled={avatarUploadLoading}
+                        onChange={handleAvatarFileChange}
+                        className="w-full rounded-3xl border border-white/10 bg-black/80 px-4 py-3 text-white outline-none"
                       />
+                      {avatarUploadMessage && <p className="text-sm text-emerald-300">{avatarUploadMessage}</p>}
                     </label>
                   </div>
+                  {form.avatar && (
+                    <div className="mt-4">
+                      <div className="text-sm text-slate-300">Current profile photo</div>
+                      <img
+                        src={resolveImageUrl(form.avatar)}
+                        alt="Profile preview"
+                        onError={handleImageError}
+                        className="mt-3 h-32 w-32 rounded-3xl object-cover"
+                      />
+                    </div>
+                  )}
 
                   <label className="mt-5 block text-sm text-slate-300">
                     <span>About you</span>
@@ -482,7 +537,7 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
                       ) : (
                         gallery.map((image) => (
                           <div key={image.id} className="relative overflow-hidden rounded-3xl border border-white/10 bg-slate-950">
-                            <img src={resolveImageUrl(image.url)} alt="Gallery" className="h-28 w-full object-cover" />
+                            <img src={resolveImageUrl(image.url)} alt="Gallery" className="h-28 w-full object-cover" onError={handleImageError} />
                             <button
                               type="button"
                               onClick={() => handleDeleteGalleryImage(image.id)}
@@ -550,7 +605,12 @@ export default function Profile({ user, onUpdateUser, onLogout, discoverFilters 
                   <div className="space-y-3">
                     <div className="text-sm text-slate-300">Current profile image</div>
                     {user.avatar || user.photo ? (
-                      <img src={resolveImageUrl(user.avatar || user.photo)} alt="Profile" className="h-48 w-full rounded-3xl object-cover" />
+                      <img
+                        src={resolveImageUrl(user.avatar || user.photo)}
+                        alt="Profile"
+                        onError={handleImageError}
+                        className="h-48 w-full rounded-3xl object-cover"
+                      />
                     ) : (
                       <div className="h-48 rounded-3xl border border-dashed border-white/15 bg-white/5 flex items-center justify-center text-slate-400">No profile image set</div>
                     )}

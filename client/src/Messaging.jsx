@@ -89,12 +89,12 @@ export default function Messaging({ user, match, onBack }) {
           />
           📷
         </label>
-        <input
-          type="text"
+        <textarea
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           placeholder="Type a message..."
           className="message-input"
+          rows={3}
         />
         <button type="submit" className="send-btn">Send</button>
       </form>

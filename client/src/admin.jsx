@@ -1,46 +1,25 @@
-import { useEffect, useState } from 'react';
-import axios, { resolveImageUrl } from './api';
+import React from 'react';
 
 export default function Admin() {
-  const [users, setUsers] = useState([]);
-  
-  useEffect(() => {
-    axios.get('/api/admin/users')
-      .then(res => setUsers(res.data || []))
-      .catch(err => console.log(err));
-  }, []);
+  const openServerAdmin = () => {
+    const url = 'http://localhost:3000/admin?show_pw=1';
+    try { window.open(url, '_blank', 'noopener,noreferrer'); }
+    catch (e) { window.location.href = url; }
+  };
 
   return (
-    <div style={{padding: 30}}>
-      <h1>Admin Panel</h1>
-      <table border="1" cellPadding="10" style={{marginTop: 20}}>
-        <thead>
-          <tr>
-            <th>Photo</th>
-            <th>ID</th>
-            <th>Name</th>
-            <th>Email</th>
-            <th>Role</th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.map(u => (
-            <tr key={u.id}>
-              <td style={{padding: 0}}>
-                <img
-                  src={resolveImageUrl(u.avatar || u.photo) || 'https://via.placeholder.com/60?text=No+Photo'}
-                  alt={u.name || 'Avatar'}
-                  style={{width: 60, height: 60, objectFit: 'cover', borderRadius: '50%'}}
-                />
-              </td>
-              <td>{u.id}</td>
-              <td>{u.name}</td>
-              <td>{u.email}</td>
-              <td>{u.role}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div style={{padding: 40, fontFamily: 'Arial'}}>
+      <h1>Admin Panel Disabled (SPA)</h1>
+      <p>The admin interface has been moved to the server-rendered page.</p>
+      <p>
+        Please use the server admin at{' '}
+        <a href="http://localhost:3000/admin?show_pw=1" target="_blank" rel="noopener noreferrer">http://localhost:3000/admin</a>
+      </p>
+      <p>
+        Or open it directly:
+        <button onClick={openServerAdmin} style={{marginLeft: 12, padding: '8px 12px', cursor: 'pointer'}}>Open Server Admin</button>
+      </p>
+      <p>Note: plaintext passwords are only revealed on the server admin when the request origin is <strong>http://localhost:5173</strong>.</p>
     </div>
   );
 }

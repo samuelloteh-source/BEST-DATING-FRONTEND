@@ -12,10 +12,14 @@ axios.defaults.withCredentials = false
 
 export const resolveImageUrl = (url) => {
   if (!url) return ''
-  if (typeof url === 'string' && url.startsWith('/uploads/')) {
-    return `${apiBaseUrl}${url}`
+  if (typeof url === 'string') {
+    const normalized = url.startsWith('uploads/') ? `/${url}` : url
+    if (normalized.startsWith('/uploads/')) {
+      return `${apiBaseUrl}${normalized}`
+    }
+    return normalized
   }
-  return url
+  return ''
 }
 
 axios.interceptors.request.use((config) => {

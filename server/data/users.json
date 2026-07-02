@@ -1992,5 +1992,86 @@
     "createdAt": 1781938541609,
     "updatedAt": 1781938541609,
     "password": "$2b$10$In5XQrlVYda0.Uc..gO2xuymQwtyioqzgsPYKGJbTk6uL3gsI7LtK"
+  },
+  {
+    "bio": "Local mail test",
+    "country": "USA",
+    "createdAt": "2026-07-01T09:26:34.071Z",
+    "dob": "1995-05-05",
+    "email": "samuelloteh+localmailtest2@gmail.com",
+    "gallery": [],
+    "gender": "Woman",
+    "interests": [
+      "Travel"
+    ],
+    "isVerified": true,
+    "likes": [],
+    "lookingFor": "Women",
+    "matches": [],
+    "messages": [],
+    "name": "Local Mail Test",
+    "notifications": [],
+    "passed": [],
+    "passwordHash": "$2b$10$pjF8XX6DGyHXxfmL/miUb.X27yUPyM17J9e/LmTk84g6CAFu5Gi6.",
+    "photoUrl": "",
+    "sessionVersion": 0,
+    "state": "Texas",
+    "suspended": false,
+    "updatedAt": 1782897994071,
+    "id": "3702da1a-8dda-4cae-9f1c-7b19813ec5f6"
+  },
+  {
+    "id": "e601e9e1-6dcb-4895-a862-f2637050b400",
+    "name": "joycelyn holms",
+    "dob": "1990-02-20",
+    "email": "sam@gmail.com",
+    "passwordHash": "$2b$10$N6c0EfhqbuFQIvtUNHm3guYvT2F74KXjWG9qVoABWe0XUpHMBZeeu",
+    "country": "USA",
+    "state": "Florida",
+    "bio": "love to be happy",
+    "interests": [
+      "swimming"
+    ],
+    "photo": "/uploads/61fe03f82eed33141b67be2205b16737",
+    "avatar": "/uploads/61fe03f82eed33141b67be2205b16737",
+    "likes": [],
+    "passed": [],
+    "matches": [],
+    "notifications": [],
+    "emailVerified": true,
+    "createdAt": 1781918013495,
+    "updatedAt": 1781918013495
+  },
+  {
+    "id": "158c0abf-c2f8-4928-9dde-894135df26e9",
+    "name": "hope Hope",
+    "dob": "1999-11-11",
+    "email": "samuelloteh@gmail.com",
+    "passwordHash": "$2b$10$GS0iiX/2n3wDqwSiw5y6/.Ll6vVnMWulRarUUItcM0iGPHSobTjPO",
+    "country": "Ghana",
+    "state": "Greater Accra Region",
+    "bio": "im a good cook",
+    "interests": [
+      "Music"
+    ],
+    "photo": "/uploads/83e447924c7a789117ee67efb406eb76",
+    "avatar": "/uploads/83e447924c7a789117ee67efb406eb76",
+    "gallery": [
+      {
+        "id": "259096cd-3a74-4cdc-a61d-ec2d739daa20",
+        "url": "/uploads/83e447924c7a789117ee67efb406eb76"
+      },
+      {
+        "id": "86cde328-12fd-4bc0-80a0-0757fb7acc9e",
+        "url": "/uploads/b55ff0b81ff43e4c5d1ce1e5a81af278"
+      }
+    ],
+    "likes": [],
+    "passed": [],
+    "matches": [],
+    "notifications": [],
+    "emailVerified": true,
+    "createdAt": 1782423462050,
+    "updatedAt": 1782423462050
   }
 ]

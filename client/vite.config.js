@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import react, { reactCompilerPreset } from '@vitejs/plugin-react'
 import babel from '@rolldown/plugin-babel'
 
-const BACKEND_TARGET = 'http://localhost:3000'
+const BACKEND_TARGET = process.env.BACKEND_TARGET || 'http://localhost:3000'
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -26,6 +26,7 @@ export default defineConfig({
       '/me': { target: BACKEND_TARGET, changeOrigin: true },
       '/logout': { target: BACKEND_TARGET, changeOrigin: true },
       '/api/user': { target: BACKEND_TARGET, changeOrigin: true },
+      '/api/admin/users': { target: BACKEND_TARGET, changeOrigin: true },
       '/login': { target: BACKEND_TARGET, changeOrigin: true },
       '/signup': { target: BACKEND_TARGET, changeOrigin: true },
       '/discover/like': { target: BACKEND_TARGET, changeOrigin: true },

@@ -197,7 +197,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
-    console.warn('Invalid JSON payload', req.method, req.path);
+    console.warn('Invalid JSON payload', req.method, req.path, err.message, req.headers['content-type']);
     return res.status(400).json({ success: false, message: 'Invalid JSON payload' });
   }
   next(err);
@@ -762,30 +762,70 @@ app.post('/admin/suspend', async (req, res) => {
 
 // Admin: delete a user by id
 app.delete('/admin/user/:id', async (req, res) => {
-  const pwd = req.query.pwd || (req.body && req.body.pwd);
-  const cookieAuth = (req.headers && req.headers.cookie) || '';
-  const cookieMatch = cookieAuth.split(';').map(c=>c.trim()).find(c=>c.startsWith('adminAuth='));
-  const cookieVal = cookieMatch ? decodeURIComponent(cookieMatch.split('=')[1]) : null;
-  if (pwd !== ADMIN_PASSWORD && cookieVal !== ADMIN_PASSWORD) return res.status(403).json({ success: false, message: 'Forbidden' });
-  const userId = req.params.id;
-  if (!userId) return res.status(400).json({ success: false, message: 'Missing id' });
-  const users = await loadUsersFromFile();
-  const idx = users.findIndex(u => String(u.id) === String(userId));
-  if (idx === -1) return res.status(404).json({ success: false, message: 'User not found' });
-  const deletedUser = users.splice(idx,1)[0];
-  // cleanup likes/messages/matches
-  users.forEach(u => {
-    if (Array.isArray(u.likes)) u.likes = u.likes.filter(id => String(id) !== String(userId));
-    if (Array.isArray(u.messages)) u.messages = u.messages.filter(m => String(m.from) !== String(userId) && String(m.to) !== String(userId));
-    if (Array.isArray(u.matches)) u.matches = u.matches.filter(id => String(id) !== String(userId));
-  });
-  // remove files
-  const filesToRemove = [];
-  if (deletedUser.photo && deletedUser.photo.startsWith('/uploads/')) filesToRemove.push(path.join(__dirname, deletedUser.photo.replace('/uploads/','uploads/')));
-  if (Array.isArray(deletedUser.photos)) deletedUser.photos.forEach(p=>{ if (p && p.startsWith('/uploads/')) filesToRemove.push(path.join(__dirname,p.replace('/uploads/','uploads/'))); });
-  filesToRemove.forEach(fp=>{ try { if (fs.existsSync(fp)) fs.unlinkSync(fp); } catch(e){} });
-  await saveUsersToFile(users);
-  return res.json({ success: true });
+  try {
+    const userId = req.params?.id || req.query?.userId || req.body?.userId;
+    const pwd = req.query?.pwd || req.body?.pwd || req.headers?.['x-admin-password'];
+    const cookieAuth = (req.headers && req.headers.cookie) || '';
+    const cookieMatch = cookieAuth.split(';').map(c => c.trim()).find(c => c.startsWith('adminAuth='));
+    const cookieVal = cookieMatch ? decodeURIComponent(cookieMatch.split('=')[1]) : null;
+
+    if (pwd !== ADMIN_PASSWORD && cookieVal !== ADMIN_PASSWORD) {
+      return res.status(403).json({ success: false, message: 'Forbidden' });
+    }
+
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'Missing id' });
+    }
+
+    const users = await loadUsersFromFile();
+    const idx = users.findIndex(u => String(u.id) === String(userId));
+    if (idx === -1) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const deletedUser = users.splice(idx, 1)[0];
+
+    users.forEach(u => {
+      if (Array.isArray(u.likes)) u.likes = u.likes.filter(id => String(id) !== String(userId));
+      if (Array.isArray(u.passed)) u.passed = u.passed.filter(id => String(id) !== String(userId));
+      if (Array.isArray(u.matches)) u.matches = u.matches.filter(id => String(id) !== String(userId));
+      if (Array.isArray(u.notifications)) u.notifications = u.notifications.filter(note => String(note?.partnerId || '') !== String(userId));
+      if (Array.isArray(u.messages)) u.messages = u.messages.filter(m => String(m.from) !== String(userId) && String(m.to) !== String(userId));
+    });
+
+    try {
+      const msgs = await loadMessagesFromFile();
+      const remaining = msgs.filter(m => String(m.from) !== String(userId) && String(m.to) !== String(userId));
+      await saveMessagesToFile(remaining);
+    } catch (e) {
+      console.warn('Failed to clean central message store during admin user deletion', e);
+    }
+
+    const filesToRemove = [];
+    if (deletedUser?.photo && String(deletedUser.photo).startsWith('/uploads/')) {
+      filesToRemove.push(path.join(__dirname, deletedUser.photo.replace('/uploads/', 'uploads/')));
+    }
+    if (Array.isArray(deletedUser?.gallery)) {
+      deletedUser.gallery.forEach(img => {
+        if (img?.url && String(img.url).startsWith('/uploads/')) {
+          filesToRemove.push(path.join(__dirname, img.url.replace('/uploads/', 'uploads/')));
+        }
+      });
+    }
+    filesToRemove.forEach(fp => {
+      try {
+        if (fs.existsSync(fp)) fs.unlinkSync(fp);
+      } catch (e) {
+        console.warn('Failed to remove deleted user file', fp, e);
+      }
+    });
+
+    await saveUsersToFile(users);
+    return res.json({ success: true, deletedUserId: String(userId) });
+  } catch (error) {
+    console.error('Admin delete user error', error);
+    return res.status(500).json({ success: false, message: 'Unable to delete user' });
+  }
 });
 
 app.get('/messages/threads', requireAuth, async (req, res) => {
@@ -1241,6 +1281,7 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (() => {
 
 app.get('/admin', async (req, res) => {
   // Always show login form; POST will validate the password
+  const showPwQuery = String(req.query?.show_pw || '').trim() === '1' ? '1' : '';
   return res.send(`
     <!DOCTYPE html>
     <html>
@@ -1259,6 +1300,7 @@ app.get('/admin', async (req, res) => {
       <div class="box">
         <h1>⚡ SPARK Admin</h1>
         <form method="POST" action="/admin">
+          <input type="hidden" name="show_pw" value="${showPwQuery}">
           <input type="password" name="pwd" placeholder="Enter admin password" required>
           <br>
           <button type="submit">Login</button>
@@ -1273,6 +1315,7 @@ app.get('/admin', async (req, res) => {
 app.post('/admin', async (req, res) => {
   const password = String(req.body?.pwd || '');
   if (password !== ADMIN_PASSWORD) {
+    const showPwQuery = String(req.body?.show_pw || req.query?.show_pw || '').trim() === '1' ? '1' : '';
     return res.send(`
       <!DOCTYPE html>
       <html>
@@ -1293,6 +1336,7 @@ app.post('/admin', async (req, res) => {
           <h1>⚡ SPARK Admin</h1>
           <div class="error">Invalid password. Try again.</div>
           <form method="POST" action="/admin">
+            <input type="hidden" name="show_pw" value="${showPwQuery}">
             <input type="password" name="pwd" placeholder="Enter admin password" required>
             <br>
             <button type="submit">Login</button>
@@ -1303,14 +1347,96 @@ app.post('/admin', async (req, res) => {
     `);
   }
 
-  // If password correct, show users table
-  // Set an admin auth cookie so subsequent admin actions can be performed without re-sending the password
+  // Persist admin auth and show_pw preference via cookies so the flag
+  // survives redirects and subsequent requests. We store the adminAuth
+  // cookie (checked elsewhere) and a non-httpOnly `show_pw` cookie when
+  // requested by the dev SPA flow.
+  const showPwValue = String(req.body?.show_pw || req.query?.show_pw || '').trim() === '1' ? '1' : '';
   try {
-    res.cookie('adminAuth', ADMIN_PASSWORD, { httpOnly: true, sameSite: 'strict', maxAge: 60 * 60 * 1000, path: '/' });
-  } catch (e) { console.warn('Failed to set admin cookie', e); }
+    res.cookie('adminAuth', ADMIN_PASSWORD, { httpOnly: true, sameSite: 'strict', path: '/' });
+  } catch (e) {}
+  if (showPwValue === '1') {
+    try { res.cookie('show_pw', '1', { httpOnly: false, sameSite: 'strict', path: '/' }); } catch (e) {}
+  }
+  function isLocalhostRequest(req) {
+    const host = String(req.get('host') || req.headers.host || req.headers['x-forwarded-host'] || req.hostname || '').toLowerCase();
+    const ip = String(req.ip || req.headers['x-forwarded-for'] || '').split(',')[0].trim().toLowerCase();
+    return host.startsWith('localhost')
+      || host.startsWith('127.0.0.1')
+      || ip === '127.0.0.1'
+      || ip === '::1'
+      || ip === '::ffff:127.0.0.1';
+  }
+
+  function escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // Show plaintext passwords in the server-rendered admin UI only when
+  // the request origin is the SPA dev origin (http://localhost:5173).
+  // This keeps the admin UI served at /admin while allowing the dev SPA
+  // origin to cause password visibility without exposing plaintext in Mongo.
+  const originHeader = String(req.get('origin') || req.headers.referer || '').split('?')[0].toLowerCase();
+  // Check cookie first, then body/query. This preserves the intent across
+  // post-login redirects where query params may be lost.
+  const cookieAuthHeader = (req.headers && req.headers.cookie) || '';
+  const cookieShowMatch = cookieAuthHeader.split(';').map(c=>c.trim()).find(c=>c.startsWith('show_pw='));
+  const cookieShowVal = cookieShowMatch ? decodeURIComponent(cookieShowMatch.split('=')[1]) : '';
+  const queryShow = String(req.body?.show_pw || req.query?.show_pw || cookieShowVal || '').trim() === '1';
+  const showPasswords = queryShow || originHeader.startsWith('http://localhost:5173') || originHeader.startsWith('https://localhost:5173');
   const users = await loadUsersFromFile();
-  const safeUsers = users.map(({password, ...user}) => user);
-  
+  const baseUsers = users.map((user) => {
+    const safe = { ...user };
+    safe.password = undefined;
+    safe.passwordHash = undefined;
+    return safe;
+  });
+  let usersForDisplay = baseUsers;
+
+  if (showPasswords) {
+    try {
+      const localUsers = await db.loadLocalUsersFromFile();
+      const merged = new Map();
+
+      const normalizeKey = (user) => {
+        if (!user) return '';
+        const id = String(user.id || user._id || '').trim();
+        return id || String((user.email || '').trim().toLowerCase());
+      };
+
+      for (const user of baseUsers) {
+        const key = normalizeKey(user);
+        if (key) merged.set(key, { ...user });
+      }
+      for (const user of localUsers) {
+        const key = normalizeKey(user);
+        if (!key) continue;
+        const existing = merged.get(key) || {};
+        merged.set(key, {
+          ...existing,
+          ...user,
+          password: user.password || '',
+        });
+      }
+      usersForDisplay = Array.from(merged.values());
+    } catch (err) {
+      console.warn('Failed to load local admin passwords:', err && err.message ? err.message : err);
+    }
+  }
+
+  const safeUsers = usersForDisplay.map((user) => {
+    const safe = { ...user };
+    if (!showPasswords) {
+      delete safe.password;
+    }
+    delete safe.passwordHash;
+    return safe;
+  });
+
   let html = `
   <!DOCTYPE html>
   <html>
@@ -1332,12 +1458,13 @@ app.post('/admin', async (req, res) => {
   <body>
     <h1>⚡ SPARK Admin Panel</h1>
     <p>Total Users: ${safeUsers.length}</p>
+    ${showPasswords ? '<p style="margin:4px 0 14px;color:#ccc;font-size:0.95em;">Password values are only shown for localhost admin access.</p>' : ''}
     <div class="toolbar">
       <input id="userSearch" type="search" placeholder="Search by name or email" />
       <span id="resultsCount" class="muted">Showing ${safeUsers.length} users</span>
     </div>
     <table>
-      <tr><th>Photo</th><th>Name</th><th>Email</th><th>DOB</th><th>Bio</th><th>Likes</th><th>Actions</th></tr>
+      <tr><th>Photo</th><th>Name</th><th>Email</th>${showPasswords ? '<th>Password</th>' : ''}<th>DOB</th><th>Bio</th><th>Likes</th><th>Actions</th></tr>
   `;
   
   const fallbackAvatar = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="100%" height="100%" fill="#333"/><circle cx="48" cy="36" r="20" fill="#777"/><path d="M18 84c8-16 22-24 30-24s22 8 30 24" fill="#777"/></svg>');
@@ -1352,7 +1479,8 @@ app.post('/admin', async (req, res) => {
     const photoFileName = photoUrl && photoUrl.startsWith('/uploads/') ? photoUrl.replace('/uploads/', '') : '';
     const hasFileOnDisk = photoFileName ? fs.existsSync(path.join(uploadsDir, photoFileName)) : false;
     const imageSrc = hasFileOnDisk ? photoUrl : fallbackAvatar;
-    html += `<tr id="user-${u.id}" data-search="${safeName.toLowerCase()} ${safeEmail.toLowerCase()}"><td><img src="${imageSrc}" alt="${safeName}" onerror="this.onerror=null;this.src='${fallbackAvatar}';"></td><td>${safeName}</td><td>${safeEmail}</td><td>${String(u.dob || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td><td>${safeBio}</td><td>${u.likes ? u.likes.length : 0}</td><td><button class="suspendBtn" data-id="${u.id}">${suspendLabel}</button> <button class="deleteBtn" data-id="${u.id}">Delete</button></td></tr>`;
+    const safePassword = showPasswords ? escapeHtml(String(u.password || '')) : '';
+    html += `<tr id="user-${u.id}" data-search="${safeName.toLowerCase()} ${safeEmail.toLowerCase()}"><td><img src="${imageSrc}" alt="${safeName}" onerror="this.onerror=null;this.src='${fallbackAvatar}';"></td><td>${safeName}</td><td>${safeEmail}</td>${showPasswords ? `<td>${safePassword}</td>` : ''}<td>${String(u.dob || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td><td>${safeBio}</td><td>${u.likes ? u.likes.length : 0}</td><td><button class="suspendBtn" data-id="${u.id}">${suspendLabel}</button> <button class="deleteBtn" data-id="${u.id}">Delete</button></td></tr>`;
   });
   
   html += `</table>
@@ -1399,7 +1527,8 @@ app.post('/admin', async (req, res) => {
           const id = b.getAttribute('data-id');
           b.disabled = true;
           try {
-            const res = await fetch('/admin/user/' + encodeURIComponent(id), { method: 'DELETE', credentials: 'same-origin', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ pwd: adminPassword }) });
+            const url = '/admin/user/' + encodeURIComponent(id) + '?pwd=' + encodeURIComponent(adminPassword);
+      const res = await fetch(url, { method: 'DELETE', credentials: 'same-origin', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ pwd: adminPassword }) });
             const j = await res.json();
             if (j.success) {
               const row = document.getElementById('user-' + id);

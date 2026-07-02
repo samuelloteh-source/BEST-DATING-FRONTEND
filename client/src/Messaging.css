@@ -173,7 +173,25 @@
   padding: 15px 20px;
   border-top: 1px solid #333;
   background: rgba(0, 0, 0, 0.5);
-  align-items: center;
+  align-items: flex-end;
+}
+
+.message-input {
+  flex: 1;
+  min-height: 54px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: white;
+  padding: 12px 14px;
+  outline: none;
+  resize: none;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.message-input:focus {
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
 .image-upload-label {

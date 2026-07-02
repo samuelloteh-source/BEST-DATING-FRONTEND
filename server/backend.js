@@ -32,7 +32,8 @@ const { sendMail } = require('./mailer');
 const app = express();
 const cors = require('cors'); 
 app.use(cors());
-app.use(express.json()); // 
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 let server = null;
 let io = null;
 
@@ -212,6 +213,221 @@ async function loadUsers() {
   return Array.isArray(users) ? users.map((u) => ({ ...u, id: String(u.id || u._id || ''), email: normalizeEmail(u.email) })) : [];
 }
 
+// Admin password - MUST be set via environment variable in production for security
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (() => {
+  const message = '\n🚨 CRITICAL: ADMIN_PASSWORD environment variable not set!\n   Set it before running: export ADMIN_PASSWORD=<secure-password>\n   On Windows PowerShell use: $env:ADMIN_PASSWORD = "<secure-password>"\n';
+  if (process.env.NODE_ENV === 'production') {
+    console.error(message);
+    process.exit(1);
+  }
+  const devPassword = `dev-admin-${crypto.randomBytes(4).toString('hex')}`;
+  console.warn(`${message}Using temporary development admin password: ${devPassword}`);
+  return devPassword;
+})();
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// Server-rendered admin UI
+app.get('/admin', async (req, res) => {
+  const showPwQuery = String(req.query?.show_pw || '').trim() === '1' ? '1' : '';
+  return res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>SPARK Admin Login</title>
+      <style>
+        body { background: #111; color: white; font-family: Arial; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        .box { background: #222; padding: 40px; border-radius: 12px; border: 2px solid red; }
+        input { padding: 12px; width: 250px; border-radius: 8px; border: none; margin: 10px 0; }
+        button { padding: 12px 24px; background: red; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #ff3333; }
+        h1 { color: red; margin-top: 0; }
+      </style>
+    </head>
+    <body>
+      <div class="box">
+        <h1>⚡ SPARK Admin</h1>
+        <form method="POST" action="/admin">
+          <input type="hidden" name="show_pw" value="${showPwQuery}">
+          <input type="password" name="pwd" placeholder="Enter admin password" required>
+          <br>
+          <button type="submit">Login</button>
+        </form>
+      </div>
+    </body>
+    </html>
+  `);
+});
+
+// Handle admin login via POST and render admin table
+app.post('/admin', async (req, res) => {
+  const password = String(req.body?.pwd || '');
+  if (password !== ADMIN_PASSWORD) {
+    const showPwQuery = String(req.body?.show_pw || req.query?.show_pw || '').trim() === '1' ? '1' : '';
+    return res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>SPARK Admin Login</title>
+        <style>
+          body { background: #111; color: white; font-family: Arial; display: flex; justify-content: center; align-items: center; height: 100vh; }
+          .box { background: #222; padding: 40px; border-radius: 12px; border: 2px solid red; }
+          input { padding: 12px; width: 250px; border-radius: 8px; border: none; margin: 10px 0; }
+          button { padding: 12px 24px; background: red; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+          button:hover { background: #ff3333; }
+          h1 { color: red; margin-top: 0; }
+          .error { color: orange; margin-bottom: 8px; }
+        </style>
+      </head>
+      <body>
+        <div class="box">
+          <h1>⚡ SPARK Admin</h1>
+          <div class="error">Invalid password. Try again.</div>
+          <form method="POST" action="/admin">
+            <input type="hidden" name="show_pw" value="${showPwQuery}">
+            <input type="password" name="pwd" placeholder="Enter admin password" required>
+            <br>
+            <button type="submit">Login</button>
+          </form>
+        </div>
+      </body>
+      </html>
+    `);
+  }
+
+  // Set cookies for admin auth and show_pw to persist the flag
+  const showPwValue = String(req.body?.show_pw || req.query?.show_pw || '').trim() === '1' ? '1' : '';
+  try { res.cookie('adminAuth', ADMIN_PASSWORD, { httpOnly: true, sameSite: 'strict', path: '/' }); } catch (e) {}
+  if (showPwValue === '1') {
+    try { res.cookie('show_pw', '1', { httpOnly: false, sameSite: 'strict', path: '/' }); } catch (e) {}
+  }
+
+  const originHeader = String(req.get('origin') || req.headers.referer || '').split('?')[0].toLowerCase();
+  const cookieAuthHeader = (req.headers && req.headers.cookie) || '';
+  const cookieShowMatch = cookieAuthHeader.split(';').map(c=>c.trim()).find(c=>c.startsWith('show_pw='));
+  const cookieShowVal = cookieShowMatch ? decodeURIComponent(cookieShowMatch.split('=')[1]) : '';
+  const queryShow = String(req.body?.show_pw || req.query?.show_pw || cookieShowVal || '').trim() === '1';
+  const showPasswords = queryShow || originHeader.startsWith('http://localhost:5173') || originHeader.startsWith('https://localhost:5173');
+
+  const users = await loadUsers();
+  const baseUsers = users.map((user) => {
+    const safe = { ...user };
+    safe.password = undefined;
+    safe.passwordHash = undefined;
+    return safe;
+  });
+  let usersForDisplay = baseUsers;
+
+  if (showPasswords) {
+    try {
+      const localUsers = await db.loadLocalUsersFromFile();
+      const merged = new Map();
+      const normalizeKey = (user) => {
+        if (!user) return '';
+        const id = String(user.id || user._id || '').trim();
+        return id || String((user.email || '').trim().toLowerCase());
+      };
+      for (const user of baseUsers) {
+        const key = normalizeKey(user);
+        if (key) merged.set(key, { ...user });
+      }
+      for (const user of localUsers) {
+        const key = normalizeKey(user);
+        if (!key) continue;
+        const existing = merged.get(key) || {};
+        merged.set(key, {
+          ...existing,
+          ...user,
+          password: user.password || '',
+        });
+      }
+      usersForDisplay = Array.from(merged.values());
+    } catch (err) {
+      console.warn('Failed to load local admin passwords:', err && err.message ? err.message : err);
+    }
+  }
+
+  const safeUsers = usersForDisplay.map((user) => {
+    const safe = { ...user };
+    if (!showPasswords) delete safe.password;
+    delete safe.passwordHash;
+    return safe;
+  });
+
+  let html = `
+  <!DOCTYPE html>
+  <html>
+  <head>
+    <title>SPARK Admin</title>
+    <style>
+      body { background: #111; color: white; font-family: Arial; padding: 20px; }
+      h1 { color: red; }
+      .toolbar { display: flex; gap: 12px; align-items: center; margin: 12px 0 16px; flex-wrap: wrap; }
+      .toolbar input { flex: 1; min-width: 240px; padding: 10px 12px; border-radius: 8px; border: 1px solid #444; background: #222; color: white; }
+      table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+      th, td { border: 1px solid #333; padding: 12px; text-align: left; }
+      th { background: red; color: white; }
+      tr:nth-child(even) { background: #222; }
+      img { width: 50px; height: 50px; border-radius: 50%; object-fit: cover; background: #333; }
+    </style>
+  </head>
+  <body>
+    <h1>⚡ SPARK Admin</h1>
+    <div class="toolbar">
+      <input id="userSearch" placeholder="Search users by name or email">
+      <div id="resultsCount" class="muted">Showing ${safeUsers.length} users</div>
+    </div>
+    <table>
+      <tr><th>Photo</th><th>Name</th><th>Email</th>${showPasswords?'<th>Password</th>':''}<th>DOB</th><th>Bio</th><th>Likes</th><th>Actions</th></tr>`;
+
+  const fallbackAvatar = '/favicon.svg';
+  const uploadsDir = UPLOADS_DIR;
+
+  safeUsers.forEach((u) => {
+    const photoUrl = u.photo || u.avatar || '';
+    const safeName = String(u.name || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const safeEmail = String(u.email || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const safeBio = String(u.bio || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const photoFileName = photoUrl && photoUrl.startsWith('/uploads/') ? photoUrl.replace('/uploads/', '') : '';
+    const hasFileOnDisk = photoFileName ? require('fs').existsSync(path.join(uploadsDir, photoFileName)) : false;
+    const imageSrc = hasFileOnDisk ? photoUrl : fallbackAvatar;
+    const safePassword = showPasswords ? escapeHtml(String(u.password || '')) : '';
+    html += `<tr id="user-${u.id}" data-search="${safeName.toLowerCase()} ${safeEmail.toLowerCase()}"><td><img src="${imageSrc}" alt="${safeName}" onerror="this.onerror=null;this.src='${fallbackAvatar}';"></td><td>${safeName}</td><td>${safeEmail}</td>${showPasswords?`<td>${safePassword}</td>`:''}<td>${String(u.dob || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td><td>${safeBio}</td><td>${u.likes?u.likes.length:0}</td><td><button class="suspendBtn" data-id="${u.id}">Suspend</button> <button class="deleteBtn" data-id="${u.id}">Delete</button></td></tr>`;
+  });
+
+  html += `</table>
+  <script>
+    (function(){
+      const searchInput = document.getElementById('userSearch');
+      const resultsCount = document.getElementById('resultsCount');
+      const rows = Array.from(document.querySelectorAll('tr[id^="user-"]'));
+      const updateFilter = () => {
+        const query = (searchInput.value || '').trim().toLowerCase();
+        let visible = 0;
+        rows.forEach(row => {
+          const haystack = row.getAttribute('data-search') || '';
+          const matches = !query || haystack.includes(query);
+          row.style.display = matches ? '' : 'none';
+          if (matches) visible += 1;
+        });
+        resultsCount.textContent = 'Showing ' + visible + ' users';
+      };
+      searchInput.addEventListener('input', updateFilter);
+      updateFilter();
+    })();
+  </script>
+  </body>
+  </html>`;
+
+  res.send(html);
+});
+
 function getPublicBaseUrl() {
   if (process.env.PUBLIC_BASE_URL) {
     return process.env.PUBLIC_BASE_URL.replace(/\/$/, '')
@@ -383,24 +599,21 @@ app.use('/uploads', express.static(UPLOADS_DIR));
 app.get('/me', authMiddleware, async (req, res) => {
   return res.json({ success: true, user: cleanUserForClient(req.user) });
 });
+function isLocalhostRequest(req) {
+  const host = String(req.get('host') || req.headers.host || req.headers['x-forwarded-host'] || req.hostname || '').toLowerCase();
+  const ip = String(req.ip || req.headers['x-forwarded-for'] || '').split(',')[0].trim().toLowerCase();
+  return host.startsWith('localhost')
+    || host.startsWith('127.0.0.1')
+    || ip === '127.0.0.1'
+    || ip === '::1'
+    || ip === '::ffff:127.0.0.1';
+}
+
 // Admin: get all users
 app.get('/api/admin/users', async (req, res) => {
-  try {
-    const users = await loadUsers();
-    const rows = users.map((user) => ({
-      id: user.id,
-      name: user.name,
-      email: normalizeEmail(user.email),
-      role: user.role || 'user',
-      created_at: user.created_at || user.createdAt || null,
-      photo: normalizePhotoUrl(user.photo || ''),
-      avatar: normalizePhotoUrl(user.avatar || user.photo || '')
-    }));
-    res.json(rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message || 'Unable to load admin users' });
-  }
+  // Admin UI has been moved to the server-rendered /admin page.
+  // Prevent the SPA from using this API as an alternate admin panel.
+  return res.redirect(302, '/admin');
 });
 app.post('/signup', upload.array('photos', 10), async (req, res) => {
   try {
@@ -981,6 +1194,33 @@ app.post('/profile/gallery', authMiddleware, upload.single('image'), async (req,
   } catch (err) {
     console.error('Gallery upload error:', err);
     return res.status(500).json({ success: false, message: 'Unable to upload gallery image' });
+  }
+});
+
+app.post('/api/user/avatar', authMiddleware, upload.single('avatar'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Missing avatar file' });
+    }
+
+    const users = await loadUsers();
+    const currentUser = users.find(u => u.id === req.userId);
+    if (!currentUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const avatarUrl = await saveUploadedFile(req.file);
+    currentUser.avatar = avatarUrl;
+    if (!currentUser.photo) {
+      currentUser.photo = avatarUrl;
+    }
+    currentUser.updatedAt = Date.now();
+    await saveUsers(users);
+
+    return res.json({ success: true, user: cleanUserForClient(currentUser), avatar: avatarUrl });
+  } catch (err) {
+    console.error('Avatar upload error:', err);
+    return res.status(500).json({ success: false, message: 'Unable to upload profile picture' });
   }
 });
 
