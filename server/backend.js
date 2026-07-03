@@ -772,7 +772,7 @@ app.post('/login', async (req, res) => {
       }
     }
     if (!isValid) {
-      return res.json({ success: false, message: 'Wrong password' });
+      return res.json({ success: false, message: 'Wrong password', forgotPasswordAvailable: true });
     }
 
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '24h' });
@@ -840,6 +840,95 @@ app.get('/verify-email', async (req, res) => {
   }
 
   return res.redirect(`${redirectUrl}?verified=false`);
+});
+
+// Forgot password - send reset email
+app.post('/forgot-password', async (req, res) => {
+  const email = normalizeEmail(req.body?.email);
+  if (!email) {
+    return res.status(400).json({ success: false, message: 'Email is required.' });
+  }
+
+  try {
+    const users = await loadUsers();
+    const user = users.find(u => normalizeEmail(u.email) === email);
+    
+    // Always return success for security (don't reveal if email exists)
+    if (!user) {
+      return res.json({ success: true, message: 'If that email exists, a password reset link has been sent.' });
+    }
+
+    // Generate reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    user.passwordResetToken = resetToken;
+    user.passwordResetExpires = Date.now() + 60 * 60 * 1000; // 1 hour expiry
+
+    // Save updated user
+    await saveUsers(users);
+
+    // Send reset email
+    const resetUrl = `${getPublicBaseUrl()}/reset-password?token=${resetToken}&email=${encodeURIComponent(user.email)}`;
+    await sendMail({
+      to: user.email,
+      subject: 'Reset your SPARK password',
+      html: `
+        <h1>Reset Your Password</h1>
+        <p>You requested a password reset for your SPARK account.</p>
+        <p>Click the link below to reset your password. This link expires in 1 hour.</p>
+        <p><a href="${resetUrl}" style="background-color: #ff0000; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Reset Password</a></p>
+        <p>If you didn't request this, please ignore this email.</p>
+      `,
+    });
+
+    return res.json({ success: true, message: 'If that email exists, a password reset link has been sent.' });
+  } catch (err) {
+    console.error('Forgot password error:', err);
+    return res.status(500).json({ success: false, message: 'Unable to process password reset request.' });
+  }
+});
+
+// Reset password with token
+app.post('/reset-password', async (req, res) => {
+  const { token, email, password } = req.body;
+  
+  if (!token || !email || !password) {
+    return res.status(400).json({ success: false, message: 'Token, email, and new password are required.' });
+  }
+
+  try {
+    const normalizedEmail = normalizeEmail(email);
+    const users = await loadUsers();
+    const user = users.find(u => normalizeEmail(u.email) === normalizedEmail);
+
+    if (!user) {
+      return res.status(400).json({ success: false, message: 'Invalid reset link.' });
+    }
+
+    // Check token validity
+    if (user.passwordResetToken !== token) {
+      return res.status(400).json({ success: false, message: 'Invalid reset link.' });
+    }
+
+    if (user.passwordResetExpires < Date.now()) {
+      return res.status(400).json({ success: false, message: 'Reset link has expired. Please request a new one.' });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Update password and clear reset token
+    user.passwordHash = hashedPassword;
+    user.password = hashedPassword;
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+
+    await saveUsers(users);
+
+    return res.json({ success: true, message: 'Password reset successfully. You can now login with your new password.' });
+  } catch (err) {
+    console.error('Reset password error:', err);
+    return res.status(500).json({ success: false, message: 'Error resetting password.' });
+  }
 });
 
 app.get('/discover', authMiddleware, async (req, res) => {

@@ -8,6 +8,8 @@ import Messaging from './Messaging'
 import Profile from './Profile'
 import Likes from './Likes'
 import Admin from './admin'
+import ForgotPassword from './ForgotPassword'
+import ResetPassword from './ResetPassword'
 
 const interestOptions = [
   'Travel', 'Cooking', 'Music', 'Fitness', 'Movies', 'Reading', 'Art & Culture',
@@ -22,6 +24,8 @@ function App() {
     const path = window.location.pathname.replace(/\/$/, '')
     if (path === '/signup') return 'signup'
     if (path === '/login') return 'login'
+    if (path === '/forgot-password') return 'forgot-password'
+    if (path === '/reset-password') return 'reset-password'
     if (path.startsWith('/app')) return 'app'
     if (path === '/admin') return 'admin'
     return 'loading'
@@ -66,6 +70,7 @@ function App() {
   const [signupStepMessage, setSignupStepMessage] = useState('')
   const [loginEmail, setLoginEmail] = useState('')
   const [loginPassword, setLoginPassword] = useState('')
+  const [showForgotPasswordOption, setShowForgotPasswordOption] = useState(false)
   const [canResendVerification, setCanResendVerification] = useState(false)
   const [resendVerificationLoading, setResendVerificationLoading] = useState(false)
   const [resendVerificationMessage, setResendVerificationMessage] = useState('')
@@ -99,6 +104,10 @@ function App() {
     } else if (path === '/login') {
       setView('login')
       handleVerificationRedirect()
+    } else if (path === '/forgot-password') {
+      setView('forgot-password')
+    } else if (path === '/reset-password') {
+      setView('reset-password')
     }
 
     const handlePopState = () => {
@@ -108,6 +117,10 @@ function App() {
       } else if (currentPath === '/login') {
         setView('login')
         handleVerificationRedirect()
+      } else if (currentPath === '/forgot-password') {
+        setView('forgot-password')
+      } else if (currentPath === '/reset-password') {
+        setView('reset-password')
       } else if (currentPath.startsWith('/app')) {
         setView('app')
         const page = currentPath.slice(4) || '/discover'
@@ -177,6 +190,7 @@ function App() {
     setCanResendVerification(false)
     setResendVerificationMessage('')
     setMessage('')
+    setShowForgotPasswordOption(false)
     try {
       const res = await axios.post('/login', { email: loginEmail, password: loginPassword })
       if (res.data?.success) {
@@ -201,6 +215,10 @@ function App() {
         setMessage(messageText)
         if (/verify your email/i.test(messageText)) {
           setCanResendVerification(true)
+          setShowForgotPasswordOption(false)
+        } else if (/wrong password/i.test(messageText)) {
+          setShowForgotPasswordOption(true)
+          setCanResendVerification(false)
         }
       }
     } catch (err) {
@@ -208,6 +226,10 @@ function App() {
       setMessage('Error: ' + msg)
       if (/verify your email/i.test(msg)) {
         setCanResendVerification(true)
+        setShowForgotPasswordOption(false)
+      } else if (/wrong password/i.test(msg)) {
+        setShowForgotPasswordOption(true)
+        setCanResendVerification(false)
       }
     }
   }
@@ -523,7 +545,7 @@ function App() {
         <form className="form-card" onSubmit={handleLogin}>
           <div className="form-field">
             <label>Email</label>
-            <input type="email" value={loginEmail} onChange={e=>{ setLoginEmail(e.target.value); setCanResendVerification(false); setResendVerificationMessage('') }} placeholder="you@example.com" required />
+            <input type="email" value={loginEmail} onChange={e=>{ setLoginEmail(e.target.value); setCanResendVerification(false); setResendVerificationMessage(''); setShowForgotPasswordOption(false) }} placeholder="you@example.com" required />
           </div>
           <div className="form-field">
             <label>Password</label>
@@ -531,6 +553,17 @@ function App() {
           </div>
           <button type="submit" className="primary-button">Login</button>
         </form>
+        {showForgotPasswordOption && (
+          <div className="form-note" style={{ marginTop: 16 }}>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => { setView('forgot-password'); window.history.pushState({}, '', '/forgot-password') }}
+            >
+              Forgot your password?
+            </button>
+          </div>
+        )}
         {canResendVerification && (
           <div className="form-note" style={{ marginTop: 16 }}>
             <button
@@ -544,7 +577,7 @@ function App() {
             {resendVerificationMessage && <p className="form-message" style={{ marginTop: 8 }}>{resendVerificationMessage}</p>}
           </div>
         )}
-        <p className="page-note">Don't have an account? <button type="button" className="button-link" onClick={() => { setView('signup'); setStep(1); setMessage(''); setSignupStepMessage(''); setCanResendVerification(false); setResendVerificationMessage(''); window.history.pushState({}, '', '/signup') }}>Signup</button></p>
+        <p className="page-note">Don't have an account? <button type="button" className="button-link" onClick={() => { setView('signup'); setStep(1); setMessage(''); setSignupStepMessage(''); setCanResendVerification(false); setResendVerificationMessage(''); setShowForgotPasswordOption(false); window.history.pushState({}, '', '/signup') }}>Signup</button></p>
         {message && <p className="form-message">{message}</p>}
       </div>
     </div>
@@ -646,6 +679,38 @@ function App() {
   )
 
   if (view === 'admin') return <Admin />;
+
+  if (view === 'forgot-password') return (
+    <ForgotPassword
+      onBackToLogin={() => {
+        setView('login')
+        setMessage('')
+        window.history.pushState({}, '', '/login')
+      }}
+      onSuccess={() => {
+        setMessage('Password reset email sent! Check your inbox.')
+        setTimeout(() => {
+          setView('login')
+          window.history.pushState({}, '', '/login')
+        }, 2000)
+      }}
+    />
+  );
+
+  if (view === 'reset-password') return (
+    <ResetPassword
+      onBackToLogin={() => {
+        setView('login')
+        setMessage('')
+        window.history.pushState({}, '', '/login')
+      }}
+      onSuccess={() => {
+        setView('login')
+        setMessage('Password reset successfully! Please login with your new password.')
+        window.history.pushState({}, '', '/login')
+      }}
+    />
+  );
 
   return view === 'signup' ? signupView : authLoading ? (
     <div className="page-shell">

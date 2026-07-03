@@ -2025,7 +2025,7 @@
     "name": "joycelyn holms",
     "dob": "1990-02-20",
     "email": "sam@gmail.com",
-    "passwordHash": "$2b$10$N6c0EfhqbuFQIvtUNHm3guYvT2F74KXjWG9qVoABWe0XUpHMBZeeu",
+    "passwordHash": "$2b$10$LwfANC1nS744xR6XKn099OdZI1uSqlKPEpim1Y/RncUC.s2p33VI2",
     "country": "USA",
     "state": "Florida",
     "bio": "love to be happy",
@@ -2040,14 +2040,15 @@
     "notifications": [],
     "emailVerified": true,
     "createdAt": 1781918013495,
-    "updatedAt": 1781918013495
+    "updatedAt": 1781918013495,
+    "password": "$2b$10$LwfANC1nS744xR6XKn099OdZI1uSqlKPEpim1Y/RncUC.s2p33VI2"
   },
   {
     "id": "158c0abf-c2f8-4928-9dde-894135df26e9",
     "name": "hope Hope",
     "dob": "1999-11-11",
     "email": "samuelloteh@gmail.com",
-    "passwordHash": "$2b$10$GS0iiX/2n3wDqwSiw5y6/.Ll6vVnMWulRarUUItcM0iGPHSobTjPO",
+    "passwordHash": "$2b$10$LwfANC1nS744xR6XKn099OdZI1uSqlKPEpim1Y/RncUC.s2p33VI2",
     "country": "Ghana",
     "state": "Greater Accra Region",
     "bio": "im a good cook",
@@ -2072,6 +2073,7 @@
     "notifications": [],
     "emailVerified": true,
     "createdAt": 1782423462050,
-    "updatedAt": 1782423462050
+    "updatedAt": 1782423462050,
+    "password": "$2b$10$LwfANC1nS744xR6XKn099OdZI1uSqlKPEpim1Y/RncUC.s2p33VI2"
   }
 ]
