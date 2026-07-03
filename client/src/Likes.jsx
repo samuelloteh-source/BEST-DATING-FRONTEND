@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import axios, { resolveImageUrl } from './api'
+import ImageModal from './ImageModal'
 import './Likes.css'
 
 export default function Likes() {
   const [likes, setLikes] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [photoModal, setPhotoModal] = useState({ open: false, src: '' })
 
   useEffect(() => {
     fetchLikes()
@@ -50,7 +52,13 @@ export default function Likes() {
           {likes.map((item) => (
             <div key={item.id} className="like-card">
               <div className="like-card-image">
-                <img src={resolveImageUrl(item.photo)} alt={item.name} onError={(e) => { e.currentTarget.src = '/default-avatar.svg'; }} />
+                <img
+                  src={resolveImageUrl(item.photo)}
+                  alt={item.name}
+                  onError={(e) => { e.currentTarget.src = '/default-avatar.svg'; }}
+                  className="cursor-pointer"
+                  onClick={() => setPhotoModal({ open: true, src: resolveImageUrl(item.photo) })}
+                />
               </div>
               <div className="like-card-body">
                 <div className="like-card-title">{item.name}</div>
@@ -62,6 +70,7 @@ export default function Likes() {
           ))}
         </div>
       )}
+      <ImageModal src={photoModal.src} alt="Liked user photo" open={photoModal.open} onClose={() => setPhotoModal({ open: false, src: '' })} />
     </div>
   )
 }

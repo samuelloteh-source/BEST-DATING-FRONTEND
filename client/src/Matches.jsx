@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import axios, { apiBaseUrl, resolveImageUrl } from './api';
+import ImageModal from './ImageModal';
 import io from 'socket.io-client';
 import './Matches.css';
 
@@ -7,6 +8,7 @@ export default function Matches({ user, title = 'Matches', emptyText = 'No match
   const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [userOnlineStatus, setUserOnlineStatus] = useState({});
+  const [photoModal, setPhotoModal] = useState({ open: false, src: '' });
   const socketRef = useRef(null);
 
   useEffect(() => {
@@ -79,6 +81,11 @@ export default function Matches({ user, title = 'Matches', emptyText = 'No match
                   src={resolveImageUrl(match.photo)}
                   alt={match.name}
                   onError={(e) => { e.currentTarget.src = '/default-avatar.svg'; }}
+                  className="cursor-pointer"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setPhotoModal({ open: true, src: resolveImageUrl(match.photo) });
+                  }}
                 />
                 <div className="match-overlay">
                   <h3>{match.name}</h3>
@@ -98,6 +105,7 @@ export default function Matches({ user, title = 'Matches', emptyText = 'No match
           ))}
         </div>
       )}
+      <ImageModal src={photoModal.src} alt="Match photo" open={photoModal.open} onClose={() => setPhotoModal({ open: false, src: '' })} />
     </div>
   );
 }

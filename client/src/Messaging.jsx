@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import axios, { resolveImageUrl } from './api';
+import ImageModal from './ImageModal';
 import './Messaging.css';
 
 export default function Messaging({ user, match, onBack }) {
@@ -7,6 +8,7 @@ export default function Messaging({ user, match, onBack }) {
   const [inputText, setInputText] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [photoModal, setPhotoModal] = useState({ open: false, src: '' });
 
   useEffect(() => {
     fetchMessages();
@@ -99,6 +101,7 @@ export default function Messaging({ user, match, onBack }) {
         <button type="submit" className="send-btn">Send</button>
       </form>
       {selectedFile && <div className="selected-file-preview">Selected: {selectedFile.name}</div>}
+      <ImageModal src={photoModal.src} alt="Message photo" open={photoModal.open} onClose={() => setPhotoModal({ open: false, src: '' })} />
     </div>
   );
 }

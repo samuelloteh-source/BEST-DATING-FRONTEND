@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import axios, { apiBaseUrl, resolveImageUrl } from './api';
 import io from 'socket.io-client';
+import ImageModal from './ImageModal';
 import './Discovery.css';
 
 const DEFAULT_FILTERS = {
@@ -25,6 +26,7 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
   const [userOnlineStatus, setUserOnlineStatus] = useState({});
   const [selectedProfile, setSelectedProfile] = useState(null);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [photoModal, setPhotoModal] = useState({ open: false, src: '' });
   const socketRef = useRef(null);
   const swipeTimeoutRef = useRef(null);
 
@@ -298,6 +300,14 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
     setSelectedProfile(null);
   };
 
+  const openPhotoModal = (photoSrc) => {
+    setPhotoModal({ open: true, src: photoSrc });
+  };
+
+  const closePhotoModal = () => {
+    setPhotoModal({ open: false, src: '' });
+  };
+
   if (loading) {
     return <div className="discovery-container"><p>Loading profiles...</p></div>;
   }
@@ -368,7 +378,13 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
         style={isTopCard ? { ...stackStyle, zIndex: 3 } : { ...stackStyle, zIndex: 3 - index }}
       >
         <div className="card-image">
-          <img src={profileImage} alt={profile.name} onError={(e) => { e.currentTarget.src = '/default-avatar.svg'; }} />
+          <img
+            src={profileImage}
+            alt={profile.name}
+            onError={(e) => { e.currentTarget.src = '/default-avatar.svg'; }}
+            className="cursor-pointer"
+            onClick={() => openPhotoModal(profileImage)}
+          />
           <div className="card-overlay">
             <h2>{profile.name}, {profile.dob ? new Date().getFullYear() - new Date(profile.dob).getFullYear() : '?'}</h2>
             <p className="location">{profile.state || profile.city}, {profile.country}</p>
@@ -464,12 +480,24 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
           <div className="profile-modal" onClick={(event) => event.stopPropagation()}>
             <button type="button" className="modal-close-btn" onClick={closeProfileDetails}>×</button>
             <div className="profile-modal-image">
-              <img src={resolveImageUrl((selectedProfile.gallery && selectedProfile.gallery.length > 0 && selectedProfile.gallery[0].url) || selectedProfile.photo)} alt={selectedProfile.name} onError={(e) => { e.currentTarget.src = '/default-avatar.svg'; }} />
+              <img
+                src={resolveImageUrl((selectedProfile.gallery && selectedProfile.gallery.length > 0 && selectedProfile.gallery[0].url) || selectedProfile.photo)}
+                alt={selectedProfile.name}
+                onError={(e) => { e.currentTarget.src = '/default-avatar.svg'; }}
+                className="cursor-pointer"
+                onClick={() => openPhotoModal(resolveImageUrl((selectedProfile.gallery && selectedProfile.gallery.length > 0 && selectedProfile.gallery[0].url) || selectedProfile.photo))}
+              />
             </div>
             {selectedProfile.gallery && selectedProfile.gallery.length > 1 && (
               <div className="gallery-thumbnails">
                 {selectedProfile.gallery.slice(0, 4).map((image) => (
-                  <img key={image.id} src={resolveImageUrl(image.url)} alt="Gallery thumbnail" className="gallery-thumbnail" />
+                  <img
+                    key={image.id}
+                    src={resolveImageUrl(image.url)}
+                    alt="Gallery thumbnail"
+                    className="gallery-thumbnail cursor-pointer"
+                    onClick={() => openPhotoModal(resolveImageUrl(image.url))}
+                  />
                 ))}
               </div>
             )}
@@ -505,6 +533,7 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
           </div>
         </div>
       )}
+      <ImageModal src={photoModal.src} alt="Profile photo" open={photoModal.open} onClose={closePhotoModal} />
     </div>
   );
 }

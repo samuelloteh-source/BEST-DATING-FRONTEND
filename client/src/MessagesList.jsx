@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
 import axios, { resolveImageUrl } from './api'
+import ImageModal from './ImageModal'
 import './MessagesList.css'
 
 export default function MessagesList({ user, onSelectMatch, onLogout }) {
   const [threads, setThreads] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [photoModal, setPhotoModal] = useState({ open: false, src: '' })
 
   useEffect(() => {
     fetchThreads()
@@ -71,6 +73,7 @@ export default function MessagesList({ user, onSelectMatch, onLogout }) {
           ))}
         </div>
       )}
+      <ImageModal src={photoModal.src} alt="Thread photo" open={photoModal.open} onClose={() => setPhotoModal({ open: false, src: '' })} />
     </div>
   )
 }
