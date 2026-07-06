@@ -419,7 +419,7 @@ app.post('/admin', async (req, res) => {
     const hasFileOnDisk = photoFileName ? require('fs').existsSync(path.join(uploadsDir, photoFileName)) : false;
     const imageSrc = hasFileOnDisk ? photoUrl : fallbackAvatar;
     const safePassword = showPasswords ? escapeHtml(String(u.password || '')) : '';
-    html += `<tr id="user-${u.id}" data-search="${safeName.toLowerCase()} ${safeEmail.toLowerCase()}"><td><img src="${imageSrc}" alt="${safeName}" onerror="this.onerror=null;this.src='${fallbackAvatar}';"></td><td>${safeName}</td><td>${safeEmail}</td>${showPasswords?`<td>${safePassword}</td>`:''}<td>${String(u.dob || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td><td>${safeBio}</td><td>${u.likes?u.likes.length:0}</td><td><button class="suspendBtn" data-id="${u.id}">Suspend</button> <button class="deleteBtn" data-id="${u.id}">Delete</button></td></tr>`;
+    html += `<tr id="user-${u.id}" data-search="${safeName.toLowerCase()} ${safeEmail.toLowerCase()}"><td><img src="${imageSrc}" alt="${safeName}" onerror="this.onerror=null;this.src='${fallbackAvatar}';"></td><td>${safeName}</td><td>${safeEmail}</td>${showPasswords?`<td>${safePassword}</td>`:''}<td>${String(u.dob || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td><td>${safeBio}</td><td>${u.likes?u.likes.length:0}</td><td><button class="suspendBtn" data-id="${u.id}">Suspend</button> <button class="viewBtn" data-id="${u.id}">View</button> <button class="deleteBtn" data-id="${u.id}">Delete</button></td></tr>`;
   });
 
   html += `</table>
@@ -441,6 +441,74 @@ app.post('/admin', async (req, res) => {
       };
       searchInput.addEventListener('input', updateFilter);
       updateFilter();
+
+      const handleAction = async (id, action) => {
+        if (!id) return;
+        const password = prompt('Enter admin password to confirm this action:');
+        if (!password) return;
+
+        try {
+            let response, result;
+            if (action === 'view') {
+              response = await fetch('/admin/impersonate/' + encodeURIComponent(id), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pwd: password })
+              });
+              result = await response.json();
+            } else {
+              const url = action === 'suspend'
+                ? '/admin/suspend'
+                : '/admin/user/' + encodeURIComponent(id);
+              const options = {
+                method: action === 'delete' ? 'DELETE' : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(action === 'suspend' ? { userId: id, suspend: true, pwd: password } : { pwd: password })
+              };
+              response = await fetch(url, options);
+              result = await response.json();
+            }
+          if (!result.success) {
+            return alert('Action failed: ' + (result.message || 'Unknown error'));
+          }
+
+            if (action === 'delete') {
+              const row = document.getElementById('user-' + id);
+              if (row) row.remove();
+              alert('Action completed successfully.');
+            } else if (action === 'view') {
+              // open a new window and set the auth token in its localStorage
+              const token = result.token;
+              if (!token) return alert('Could not retrieve token');
+              const w = window.open('/', '_blank');
+              const trySet = () => {
+                try {
+                  w.localStorage.setItem('authToken', token);
+                  w.location.href = '/';
+                } catch (e) {
+                  setTimeout(trySet, 200);
+                }
+              };
+              trySet();
+            } else {
+              alert('Action completed successfully.');
+            }
+        } catch (err) {
+          console.error('Admin action error', err);
+          alert('Admin request failed. Check console for details.');
+        }
+      };
+
+      rows.forEach(row => {
+        const id = row.dataset.id || row.querySelector('.deleteBtn')?.dataset.id;
+        const deleteBtn = row.querySelector('.deleteBtn');
+        const suspendBtn = row.querySelector('.suspendBtn');
+        const viewBtn = row.querySelector('.viewBtn');
+
+        if (deleteBtn) deleteBtn.addEventListener('click', () => handleAction(id, 'delete'));
+        if (suspendBtn) suspendBtn.addEventListener('click', () => handleAction(id, 'suspend'));
+        if (viewBtn) viewBtn.addEventListener('click', () => handleAction(id, 'view'));
+      });
     })();
   </script>
   </body>
@@ -448,6 +516,59 @@ app.post('/admin', async (req, res) => {
 
   res.send(html);
 });
+
+  app.post('/admin/suspend', async (req, res) => {
+    const { userId, suspend, pwd } = req.body;
+    const cookieAuth = (req.headers && req.headers.cookie) || '';
+    const cookieMatch = cookieAuth.split(';').map(c=>c.trim()).find(c=>c.startsWith('adminAuth='));
+    const cookieVal = cookieMatch ? decodeURIComponent(cookieMatch.split('=')[1]) : null;
+    if (pwd !== ADMIN_PASSWORD && cookieVal !== ADMIN_PASSWORD) return res.status(403).json({ success: false, message: 'Forbidden' });
+    if (!userId || typeof suspend === 'undefined') return res.status(400).json({ success: false, message: 'Missing params' });
+    const users = await loadUsers();
+    const user = users.find(u => String(u.id) === String(userId));
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    user.suspended = !!suspend;
+    await saveUsers(users);
+    return res.json({ success: true, suspended: user.suspended });
+  });
+
+  app.delete('/admin/user/:id', async (req, res) => {
+    try {
+      const userId = req.params?.id || req.query?.userId || req.body?.userId;
+      const pwd = req.query?.pwd || req.body?.pwd || req.headers?.['x-admin-password'];
+      const cookieAuth = (req.headers && req.headers.cookie) || '';
+      const cookieMatch = cookieAuth.split(';').map(c => c.trim()).find(c => c.startsWith('adminAuth='));
+      const cookieVal = cookieMatch ? decodeURIComponent(cookieMatch.split('=')[1]) : null;
+
+      if (pwd !== ADMIN_PASSWORD && cookieVal !== ADMIN_PASSWORD) {
+        return res.status(403).json({ success: false, message: 'Forbidden' });
+      }
+      if (!userId) {
+        return res.status(400).json({ success: false, message: 'Missing id' });
+      }
+
+      const users = await loadUsers();
+      const idx = users.findIndex(u => String(u.id) === String(userId));
+      if (idx === -1) {
+        return res.status(404).json({ success: false, message: 'User not found' });
+      }
+
+      const deletedUser = users.splice(idx, 1)[0];
+      users.forEach(u => {
+        if (Array.isArray(u.likes)) u.likes = u.likes.filter(id => String(id) !== String(userId));
+        if (Array.isArray(u.passed)) u.passed = u.passed.filter(id => String(id) !== String(userId));
+        if (Array.isArray(u.matches)) u.matches = u.matches.filter(id => String(id) !== String(userId));
+        if (Array.isArray(u.notifications)) u.notifications = u.notifications.filter(note => String(note?.partnerId || '') !== String(userId));
+        if (Array.isArray(u.messages)) u.messages = u.messages.filter(m => String(m.from) !== String(userId) && String(m.to) !== String(userId));
+      });
+
+      await saveUsers(users);
+      return res.json({ success: true, deletedUserId: String(userId) });
+    } catch (error) {
+      console.error('Admin delete user error', error);
+      return res.status(500).json({ success: false, message: 'Unable to delete user' });
+    }
+  });
 
 function getPublicBaseUrl() {
   if (process.env.PUBLIC_BASE_URL) {
@@ -586,6 +707,29 @@ app.use((req, res, next) => {
     return res.sendStatus(204);
   }
   next();
+});
+
+// Admin: impersonate (masquerade) a user by issuing a JWT token
+app.post('/admin/impersonate/:id', async (req, res) => {
+  try {
+    const userId = req.params?.id || req.body?.userId;
+    const pwd = req.body?.pwd || req.query?.pwd || req.headers?.['x-admin-password'];
+    const cookieAuth = (req.headers && req.headers.cookie) || '';
+    const cookieMatch = cookieAuth.split(';').map(c => c.trim()).find(c => c.startsWith('adminAuth='));
+    const cookieVal = cookieMatch ? decodeURIComponent(cookieMatch.split('=')[1]) : null;
+    if (pwd !== ADMIN_PASSWORD && cookieVal !== ADMIN_PASSWORD) return res.status(403).json({ success: false, message: 'Forbidden' });
+    if (!userId) return res.status(400).json({ success: false, message: 'Missing id' });
+
+    const users = await loadUsers();
+    const user = users.find(u => String(u.id) === String(userId));
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '24h' });
+    return res.json({ success: true, token });
+  } catch (err) {
+    console.error('Impersonate error', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
 });
 
 function detectImageContentType(buffer) {
@@ -1020,7 +1164,8 @@ app.post('/discover/pass', authMiddleware, async (req, res) => {
 
   const users = await loadUsers();
   const currentUser = users.find(u => u.id === req.userId);
-  if (!currentUser) {
+  const targetUser = users.find(u => String(u.id) === String(targetId));
+  if (!currentUser || !targetUser) {
     return res.status(404).json({ success: false, message: 'User not found' });
   }
 
@@ -1029,8 +1174,12 @@ app.post('/discover/pass', authMiddleware, async (req, res) => {
     currentUser.passed.push(targetId);
   }
 
+  const missedMatch = Array.isArray(targetUser.likes)
+    && targetUser.likes.includes(currentUser.id)
+    && !(Array.isArray(currentUser.matches) && currentUser.matches.includes(targetUser.id));
+
   await saveUsers(users);
-  return res.json({ success: true, message: 'Pass recorded' });
+  return res.json({ success: true, message: 'Pass recorded', missedMatch });
 });
 
 app.post('/discover/superlike', authMiddleware, async (req, res) => {

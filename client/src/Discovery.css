@@ -503,7 +503,8 @@ html, body, #root {
 
 .pass-btn,
 .superlike-btn,
-.like-btn {
+.like-btn,
+.rewind-btn {
   width: 70px;
   height: 70px;
   border-radius: 50%;
@@ -523,7 +524,8 @@ html, body, #root {
 
 .pass-btn:hover,
 .superlike-btn:hover,
-.like-btn:hover {
+.like-btn:hover,
+.rewind-btn:hover {
   transform: translateY(-2px) scale(1.04);
 }
 
@@ -548,6 +550,23 @@ html, body, #root {
   background: #17a2ff;
   color: white;
   transform: scale(1.08);
+}
+
+.rewind-btn {
+  border-color: #f0ad4e;
+  background: rgba(240, 173, 78, 0.18);
+  color: #f0ad4e;
+}
+
+.rewind-btn:hover {
+  background: #f0ad4e;
+  color: white;
+  transform: scale(1.08);
+}
+
+.rewind-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .like-btn {

@@ -27,6 +27,8 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
   const [selectedProfile, setSelectedProfile] = useState(null);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [photoModal, setPhotoModal] = useState({ open: false, src: '' });
+  const [lastPassedId, setLastPassedId] = useState(null);
+  const [hasRewound, setHasRewound] = useState(false);
   const socketRef = useRef(null);
   const swipeTimeoutRef = useRef(null);
 
@@ -111,14 +113,29 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
   const handlePass = async () => {
     if (!currentUser) return;
     const targetId = currentUser.id;
+    if (!hasRewound) setLastPassedId(targetId);
     moveToNextCard();
     resetDrag();
 
     try {
-      await axios.post('/discover/pass', { targetId });
+      const response = await axios.post('/discover/pass', { targetId });
+      if (response.data.missedMatch) {
+        setMessage(`😢 You just missed a match with ${currentUser.name}.`);
+      }
     } catch (err) {
       console.error('Failed to pass:', err);
       setMessage('Could not record your pass. Please try again.');
+      setTimeout(() => setMessage(''), 3000);
+    }
+  };
+
+  const rewindLastPass = () => {
+    if (!lastPassedId || hasRewound || filteredUsers.length === 0) return;
+    const rewindIndex = filteredUsers.findIndex((user) => String(user.id) === String(lastPassedId));
+    if (rewindIndex >= 0) {
+      setCurrentIndex(rewindIndex);
+      setHasRewound(true);
+      setMessage('🔄 Rewind used: this profile is back.');
       setTimeout(() => setMessage(''), 3000);
     }
   };
@@ -206,6 +223,7 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
 
   const currentUser = filteredUsers[currentIndex];
   const stackUsers = filteredUsers.slice(currentIndex, currentIndex + 3);
+  const canRewind = Boolean(lastPassedId && !hasRewound && filteredUsers.length > 0);
 
   const currentUserImage = resolveImageUrl(
     (currentUser?.gallery && currentUser.gallery.length > 0 && currentUser.gallery[0].url)
@@ -285,6 +303,7 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
     if (currentIndex < filteredUsers.length - 1) {
       setCurrentIndex((prev) => prev + 1);
     } else {
+      setCurrentIndex((prev) => prev + 1);
       setMessage('No more users to discover');
       setTimeout(() => fetchDiscoverUsers(), 2000);
     }
@@ -423,6 +442,9 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
             <div className="card-actions-overlay">
               <button onClick={() => triggerSwipeAction('pass', handlePass)} className="pass-btn">
                 <span>✕</span>
+              </button>
+              <button onClick={rewindLastPass} className="rewind-btn" disabled={!canRewind}>
+                <span>↺</span>
               </button>
               <button onClick={() => triggerSwipeAction('superlike', handleSuperLike)} className="superlike-btn">
                 <span>★</span>
