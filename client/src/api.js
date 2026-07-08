@@ -4,8 +4,8 @@ import axios from 'axios'
 // to the local backend on port 3001 so login and other auth requests reach the
 // correct server instead of failing with a 404 from the frontend host.
 const envApi = import.meta.env.VITE_API_URL
-const fallbackApi = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
-  ? 'http://localhost:3001'
+const fallbackApi = (typeof window !== 'undefined')
+  ? `${window.location.protocol}//${window.location.hostname}${window.location.port ? `:${window.location.port}` : ''}`
   : ''
 export const apiBaseUrl = (typeof envApi === 'string' && envApi.length > 0) ? envApi : fallbackApi
 
