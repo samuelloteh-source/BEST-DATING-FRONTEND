@@ -760,6 +760,37 @@ app.post('/admin/suspend', async (req, res) => {
   return res.json({ success: true, suspended: user.suspended });
 });
 
+// Admin: impersonate a user and open their account
+app.post('/admin/impersonate/:id', async (req, res) => {
+  try {
+    const userId = req.params?.id || req.body?.userId;
+    const pwd = req.body?.pwd || req.query?.pwd || req.headers?.['x-admin-password'];
+    const cookieAuth = (req.headers && req.headers.cookie) || '';
+    const cookieMatch = cookieAuth.split(';').map(c => c.trim()).find(c => c.startsWith('adminAuth='));
+    const cookieVal = cookieMatch ? decodeURIComponent(cookieMatch.split('=')[1]) : null;
+
+    if (pwd !== ADMIN_PASSWORD && cookieVal !== ADMIN_PASSWORD) {
+      return res.status(403).json({ success: false, message: 'Forbidden' });
+    }
+
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'Missing id' });
+    }
+
+    const users = await loadUsersFromFile();
+    const user = users.find(u => String(u.id) === String(userId));
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '24h' });
+    return res.json({ success: true, token });
+  } catch (error) {
+    console.error('Admin impersonate error', error);
+    return res.status(500).json({ success: false, message: 'Unable to open user account' });
+  }
+});
+
 // Admin: delete a user by id
 app.delete('/admin/user/:id', async (req, res) => {
   try {
@@ -1480,7 +1511,7 @@ app.post('/admin', async (req, res) => {
     const hasFileOnDisk = photoFileName ? fs.existsSync(path.join(uploadsDir, photoFileName)) : false;
     const imageSrc = hasFileOnDisk ? photoUrl : fallbackAvatar;
     const safePassword = showPasswords ? escapeHtml(String(u.password || '')) : '';
-    html += `<tr id="user-${u.id}" data-search="${safeName.toLowerCase()} ${safeEmail.toLowerCase()}"><td><img src="${imageSrc}" alt="${safeName}" onerror="this.onerror=null;this.src='${fallbackAvatar}';"></td><td>${safeName}</td><td>${safeEmail}</td>${showPasswords ? `<td>${safePassword}</td>` : ''}<td>${String(u.dob || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td><td>${safeBio}</td><td>${u.likes ? u.likes.length : 0}</td><td><button class="suspendBtn" data-id="${u.id}">${suspendLabel}</button> <button class="deleteBtn" data-id="${u.id}">Delete</button></td></tr>`;
+    html += `<tr id="user-${u.id}" data-search="${safeName.toLowerCase()} ${safeEmail.toLowerCase()}"><td><img src="${imageSrc}" alt="${safeName}" onerror="this.onerror=null;this.src='${fallbackAvatar}';"></td><td>${safeName}</td><td>${safeEmail}</td>${showPasswords ? `<td>${safePassword}</td>` : ''}<td>${String(u.dob || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td><td>${safeBio}</td><td>${u.likes ? u.likes.length : 0}</td><td><button class="suspendBtn" data-id="${u.id}">${suspendLabel}</button> <button class="viewBtn" data-id="${u.id}">View</button> <button class="deleteBtn" data-id="${u.id}">Delete</button></td></tr>`;
   });
   
   html += `</table>
@@ -1518,6 +1549,43 @@ app.post('/admin', async (req, res) => {
               alert(j.message || 'Failed');
             }
           } catch(e){ console.error(e); alert('Failed'); }
+          b.disabled = false;
+        });
+      });
+      document.querySelectorAll('.viewBtn').forEach(b=>{
+        b.addEventListener('click', async ()=>{
+          const id = b.getAttribute('data-id');
+          b.disabled = true;
+          try {
+            const res = await fetch('/admin/impersonate/' + encodeURIComponent(id), {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pwd: adminPassword })
+            });
+            const j = await res.json();
+            if (!j.success || !j.token) {
+              alert(j.message || 'Unable to open user account');
+              return;
+            }
+            const popup = window.open('/', '_blank');
+            if (!popup) {
+              alert('Please allow popups to view the user account');
+              return;
+            }
+            const trySet = () => {
+              try {
+                popup.localStorage.setItem('authToken', j.token);
+                popup.location.href = '/';
+              } catch (e) {
+                setTimeout(trySet, 200);
+              }
+            };
+            trySet();
+          } catch (e) {
+            console.error(e);
+            alert('Unable to open user account');
+          }
           b.disabled = false;
         });
       });
