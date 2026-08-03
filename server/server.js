@@ -1313,10 +1313,12 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (() => {
 app.get('/admin', async (req, res) => {
   // Always show login form; POST will validate the password
   const showPwQuery = String(req.query?.show_pw || '').trim() === '1' ? '1' : '';
+  res.set('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
   return res.send(`
     <!DOCTYPE html>
     <html>
     <head>
+      <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
       <title>SPARK Admin Login</title>
       <style>
         body { background: #111; color: white; font-family: Arial; display: flex; justify-content: center; align-items: center; height: 100vh; }
@@ -1345,12 +1347,14 @@ app.get('/admin', async (req, res) => {
 // Handle admin login via POST to avoid exposing password in URL
 app.post('/admin', async (req, res) => {
   const password = String(req.body?.pwd || '');
+  res.set('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
   if (password !== ADMIN_PASSWORD) {
     const showPwQuery = String(req.body?.show_pw || req.query?.show_pw || '').trim() === '1' ? '1' : '';
     return res.send(`
       <!DOCTYPE html>
       <html>
       <head>
+        <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
         <title>SPARK Admin Login</title>
         <style>
           body { background: #111; color: white; font-family: Arial; display: flex; justify-content: center; align-items: center; height: 100vh; }
@@ -1472,6 +1476,7 @@ app.post('/admin', async (req, res) => {
   <!DOCTYPE html>
   <html>
   <head>
+    <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
     <title>SPARK Admin</title>
     <style>
       body { background: #111; color: white; font-family: Arial; padding: 20px; }

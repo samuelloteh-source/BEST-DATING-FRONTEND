@@ -1,13 +1,11 @@
 import axios from 'axios'
 
-// Prefer the explicit API URL when provided. For local development, fall back
-// to the local backend on port 3001 so login and other auth requests reach the
-// correct server instead of failing with a 404 from the frontend host.
+// Prefer relative (same-origin) requests by default to avoid accidental
+// calls to an external host set at build-time. If `VITE_API_URL` is explicitly
+// provided (non-empty), use it; otherwise use a relative base so the browser
+// sends requests to the same origin that served the frontend.
 const envApi = import.meta.env.VITE_API_URL
-const fallbackApi = (typeof window !== 'undefined')
-  ? `${window.location.protocol}//${window.location.hostname}${window.location.port ? `:${window.location.port}` : ''}`
-  : ''
-export const apiBaseUrl = (typeof envApi === 'string' && envApi.length > 0) ? envApi : fallbackApi
+export const apiBaseUrl = (typeof envApi === 'string' && envApi.length > 0) ? envApi : ''
 
 axios.defaults.baseURL = apiBaseUrl
 axios.defaults.withCredentials = false
