@@ -18,7 +18,9 @@
     "multer": "^2.1.1",
     "nodemailer": "^9.0.1",
     "socket.io": "^4.7.2",
-    "sqlite3": "^6.0.1"  },
+    "sqlite3": "^6.0.1"
+  },
   "devDependencies": {
-    "vercel": "^41.0.0"  }
+    "vercel": "^41.0.0"
+  }
 }
