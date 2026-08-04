@@ -73,3 +73,6 @@ uploads/
 .vercel
 .env*
 api/test-email.js
+
+# server utility scripts
+server/scripts/*.js
