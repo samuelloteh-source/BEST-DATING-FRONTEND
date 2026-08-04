@@ -7,7 +7,6 @@ import MessagesList from './MessagesList'
 import Messaging from './Messaging'
 import Profile from './Profile'
 import Likes from './Likes'
-import Admin from './admin'
 import ForgotPassword from './ForgotPassword'
 import ResetPassword from './ResetPassword'
 
@@ -27,7 +26,6 @@ function App() {
     if (path === '/forgot-password') return 'forgot-password'
     if (path === '/reset-password') return 'reset-password'
     if (path.startsWith('/app')) return 'app'
-    if (path === '/admin') return 'admin'
     return 'loading'
   })
   const [currentPage, setCurrentPage] = useState(() => {
@@ -139,15 +137,23 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (authToken) {
-      axios.defaults.headers.common['Authorization'] = `Bearer ${authToken}`
-      fetchNotifications()
-    } else {
+    if (!authToken) {
       delete axios.defaults.headers.common['Authorization']
       setAuthLoading(false)
       return
     }
-    fetchCurrentUser()
+
+    axios.defaults.headers.common['Authorization'] = `Bearer ${authToken}`
+    const initializeAuth = async () => {
+      try {
+        await fetchCurrentUser()
+        await fetchNotifications()
+      } catch (err) {
+        console.error('Auth initialization failed:', err)
+      }
+    }
+
+    initializeAuth()
   }, [authToken])
 
   useEffect(() => {
@@ -160,7 +166,7 @@ function App() {
 
   const fetchNotifications = async () => {
     try {
-      const res = await axios.get('/notifications')
+      const res = await axios.get('/notifications', { timeout: 10000 })
       if (res.data?.success) {
         setNotifications(res.data.notifications || [])
       }
@@ -171,8 +177,9 @@ function App() {
   }
 
   const fetchCurrentUser = async () => {
+    setAuthLoading(true)
     try {
-      const res = await axios.get('/me')
+      const res = await axios.get('/me', { timeout: 10000 })
       setUser(res.data.user || res.data)
       setView('app')
     } catch (err) {
@@ -209,7 +216,7 @@ function App() {
         } else {
           await fetchCurrentUser()
         }
-        await fetchNotifications()
+        window.history.replaceState({}, '', '/app/discover')
       } else {
         const messageText = res.data?.message || 'Login failed'
         setMessage(messageText)
@@ -677,8 +684,6 @@ function App() {
       </div>
     </div>
   )
-
-  if (view === 'admin') return <Admin />;
 
   if (view === 'forgot-password') return (
     <ForgotPassword
