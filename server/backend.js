@@ -272,13 +272,8 @@ async function sendAdminVerificationCode(req) {
   return code;
 }
 
-function renderAdminLoginHtml({ errorMessage = '', infoMessage = '', showPwQuery = '', requireVerification = false }) {
-  const verificationField = requireVerification
-    ? '<input type="text" name="verificationCode" inputmode="numeric" autocomplete="one-time-code" placeholder="Verification code" required>'
-    : '';
-  const notice = requireVerification
-    ? `<p style="color:#ffd166; margin:8px 0 12px;">Remote access requires a one-time code sent to ${ADMIN_VERIFICATION_EMAIL}.</p>`
-    : '<p style="color:#aaa; margin:8px 0 12px;">Localhost access does not require a verification code.</p>';
+function renderAdminPasswordHtml({ errorMessage = '', infoMessage = '', showPwQuery = '' }) {
+  const notice = `<p style="color:#ffd166; margin:8px 0 12px;">Enter the admin password to request a one-time verification code sent to ${ADMIN_VERIFICATION_EMAIL}.</p>`;
   const errorBlock = errorMessage ? `<div style="color:orange; margin-bottom:8px;">${escapeHtml(errorMessage)}</div>` : '';
   const infoBlock = infoMessage ? `<div style="color:#7ee787; margin-bottom:8px;">${escapeHtml(infoMessage)}</div>` : '';
 
@@ -287,7 +282,7 @@ function renderAdminLoginHtml({ errorMessage = '', infoMessage = '', showPwQuery
     <html>
     <head>
       <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
-      <title>SPARK Admin Login</title>
+      <title>SPARK Admin Password</title>
       <style>
         body { background: #111; color: white; font-family: Arial; display: flex; justify-content: center; align-items: center; height: 100vh; }
         .box { background: #222; padding: 40px; border-radius: 12px; border: 2px solid red; }
@@ -305,9 +300,45 @@ function renderAdminLoginHtml({ errorMessage = '', infoMessage = '', showPwQuery
         <form method="POST" action="/lookaway-927883-xk9">
           <input type="hidden" name="show_pw" value="${showPwQuery}">
           <input type="password" name="pwd" placeholder="Enter admin password" required>
-          ${verificationField}
           <br>
-          <button type="submit">Login</button>
+          <button type="submit">Request verification code</button>
+        </form>
+      </div>
+    </body>
+    </html>
+  `;
+}
+
+function renderAdminVerificationHtml({ errorMessage = '', infoMessage = '', showPwQuery = '' }) {
+  const notice = `<p style="color:#ffd166; margin:8px 0 12px;">A one-time verification code was sent to ${ADMIN_VERIFICATION_EMAIL}. Enter it below to complete admin login.</p>`;
+  const errorBlock = errorMessage ? `<div style="color:orange; margin-bottom:8px;">${escapeHtml(errorMessage)}</div>` : '';
+  const infoBlock = infoMessage ? `<div style="color:#7ee787; margin-bottom:8px;">${escapeHtml(infoMessage)}</div>` : '';
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
+      <title>SPARK Admin Verification</title>
+      <style>
+        body { background: #111; color: white; font-family: Arial; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        .box { background: #222; padding: 40px; border-radius: 12px; border: 2px solid red; }
+        input { padding: 12px; width: 250px; border-radius: 8px; border: none; margin: 10px 0; }
+        button { padding: 12px 24px; background: red; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #ff3333; }
+        h1 { color: red; margin-top: 0; }
+      </style>
+    </head>
+    <body>
+      <div class="box">
+        <h1>⚡ SPARK Admin Verification</h1>
+        ${notice}
+        ${errorBlock}${infoBlock}
+        <form method="POST" action="/lookaway-927883-xk9/verify">
+          <input type="hidden" name="show_pw" value="${showPwQuery}">
+          <input type="text" name="verificationCode" inputmode="numeric" autocomplete="one-time-code" placeholder="Enter verification code" required>
+          <br>
+          <button type="submit">Verify code</button>
         </form>
       </div>
     </body>
@@ -326,44 +357,54 @@ function escapeHtml(value) {
 // Server-rendered admin UI
 app.get('/lookaway-927883-xk9', async (req, res) => {
   const showPwQuery = String(req.query?.show_pw || '').trim() === '1' ? '1' : '';
-  const requireVerification = Boolean(process.env.VERCEL) || !isLocalhostRequest(req);
-  return res.send(renderAdminLoginHtml({ showPwQuery, requireVerification }));
+  return res.send(renderAdminPasswordHtml({ showPwQuery }));
 });
 
 // Handle admin login via POST and render admin table
 app.post('/lookaway-927883-xk9', async (req, res) => {
   const password = String(req.body?.pwd || '');
-  const verificationCode = String(req.body?.verificationCode || '').trim();
   const showPwQuery = String(req.body?.show_pw || req.query?.show_pw || '').trim() === '1' ? '1' : '';
   const requireVerification = Boolean(process.env.VERCEL) || !isLocalhostRequest(req);
 
   if (password !== ADMIN_PASSWORD) {
-    return res.send(renderAdminLoginHtml({ errorMessage: 'Invalid password. Try again.', showPwQuery, requireVerification }));
+    return res.send(renderAdminPasswordHtml({ errorMessage: 'Invalid password. Try again.', showPwQuery }));
   }
 
   if (requireVerification) {
-    const isCodeValid = pendingAdminVerification.code
-      && !pendingAdminVerification.used
-      && Date.now() < pendingAdminVerification.expiresAt
-      && verificationCode === pendingAdminVerification.code;
-
-    if (!verificationCode) {
-      try {
-        await sendAdminVerificationCode(req);
-      } catch (err) {
-        return res.send(renderAdminLoginHtml({ errorMessage: 'Unable to send verification code. Please try again later.', showPwQuery, requireVerification }));
-      }
-      return res.send(renderAdminLoginHtml({ infoMessage: `A one-time verification code was sent to ${ADMIN_VERIFICATION_EMAIL}.`, showPwQuery, requireVerification }));
+    try {
+      await sendAdminVerificationCode(req);
+    } catch (err) {
+      return res.send(renderAdminPasswordHtml({ errorMessage: 'Unable to send verification code. Please try again later.', showPwQuery }));
     }
-
-    if (!isCodeValid) {
-      return res.send(renderAdminLoginHtml({ errorMessage: 'Invalid or expired verification code.', showPwQuery, requireVerification }));
-    }
-
-    pendingAdminVerification = { code: null, expiresAt: 0, used: true };
+    return res.send(renderAdminVerificationHtml({ infoMessage: `A one-time verification code was sent to ${ADMIN_VERIFICATION_EMAIL}.`, showPwQuery }));
   }
 
-  // Set cookies for admin auth and show_pw to persist the flag
+  return completeAdminLogin(req, res, showPwQuery);
+});
+
+app.post('/lookaway-927883-xk9/verify', async (req, res) => {
+  const verificationCode = String(req.body?.verificationCode || '').trim();
+  const showPwQuery = String(req.body?.show_pw || req.query?.show_pw || '').trim() === '1' ? '1' : '';
+  const requireVerification = Boolean(process.env.VERCEL) || !isLocalhostRequest(req);
+
+  if (!requireVerification) {
+    return completeAdminLogin(req, res, showPwQuery);
+  }
+
+  const isCodeValid = pendingAdminVerification.code
+    && !pendingAdminVerification.used
+    && Date.now() < pendingAdminVerification.expiresAt
+    && verificationCode === pendingAdminVerification.code;
+
+  if (!isCodeValid) {
+    return res.send(renderAdminVerificationHtml({ errorMessage: 'Invalid or expired verification code.', showPwQuery }));
+  }
+
+  pendingAdminVerification = { code: null, expiresAt: 0, used: true };
+  return completeAdminLogin(req, res, showPwQuery);
+});
+
+async function completeAdminLogin(req, res, showPwQuery) {
   const showPwValue = showPwQuery;
   try { res.cookie('adminAuth', ADMIN_PASSWORD, { httpOnly: true, sameSite: 'strict', path: '/' }); } catch (e) {}
   if (showPwValue === '1') {
@@ -372,7 +413,7 @@ app.post('/lookaway-927883-xk9', async (req, res) => {
 
   const originHeader = String(req.get('origin') || req.headers.referer || '').split('?')[0].toLowerCase();
   const cookieAuthHeader = (req.headers && req.headers.cookie) || '';
-  const cookieShowMatch = cookieAuthHeader.split(';').map(c=>c.trim()).find(c=>c.startsWith('show_pw='));
+  const cookieShowMatch = cookieAuthHeader.split(';').map(c => c.trim()).find(c => c.startsWith('show_pw='));
   const cookieShowVal = cookieShowMatch ? decodeURIComponent(cookieShowMatch.split('=')[1]) : '';
   const queryShow = String(req.body?.show_pw || req.query?.show_pw || cookieShowVal || '').trim() === '1';
   const showPasswords = queryShow || originHeader.startsWith('http://localhost:5173') || originHeader.startsWith('https://localhost:5173');
@@ -488,7 +529,7 @@ app.post('/lookaway-927883-xk9', async (req, res) => {
   </html>`;
 
   res.send(html);
-});
+}
 
 function getPublicBaseUrl() {
   if (process.env.PUBLIC_BASE_URL) {
