@@ -249,6 +249,17 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (() => {
 const ADMIN_VERIFICATION_EMAIL = process.env.ADMIN_VERIFICATION_EMAIL || process.env.ADMIN_EMAIL || 'samuelloteh@gmail.com';
 let pendingAdminVerification = { code: null, expiresAt: 0, used: false };
 
+function maskVerificationEmail(email) {
+  const [local, domain] = String(email || '').split('@');
+  if (!local || !domain) return 'hidden email';
+  if (local.length <= 2) {
+    return `${local[0]}***@${domain}`;
+  }
+  const visible = Math.min(3, local.length - 2);
+  const prefix = local.slice(0, visible);
+  return `${prefix}${'*'.repeat(local.length - visible)}@${domain}`;
+}
+
 function createAdminVerificationCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
@@ -273,7 +284,8 @@ async function sendAdminVerificationCode(req) {
 }
 
 function renderAdminPasswordHtml({ errorMessage = '', infoMessage = '', showPwQuery = '' }) {
-  const notice = `<p style="color:#ffd166; margin:8px 0 12px;">Enter the admin password to request a one-time verification code sent to ${ADMIN_VERIFICATION_EMAIL}.</p>`;
+  const maskedEmail = maskVerificationEmail(ADMIN_VERIFICATION_EMAIL);
+  const notice = `<p style="color:#ffd166; margin:8px 0 12px;">Enter the admin password to request a one-time verification code sent to ${maskedEmail}.</p>`;
   const errorBlock = errorMessage ? `<div style="color:orange; margin-bottom:8px;">${escapeHtml(errorMessage)}</div>` : '';
   const infoBlock = infoMessage ? `<div style="color:#7ee787; margin-bottom:8px;">${escapeHtml(infoMessage)}</div>` : '';
 
@@ -310,7 +322,8 @@ function renderAdminPasswordHtml({ errorMessage = '', infoMessage = '', showPwQu
 }
 
 function renderAdminVerificationHtml({ errorMessage = '', infoMessage = '', showPwQuery = '' }) {
-  const notice = `<p style="color:#ffd166; margin:8px 0 12px;">A one-time verification code was sent to ${ADMIN_VERIFICATION_EMAIL}. Enter it below to complete admin login.</p>`;
+  const maskedEmail = maskVerificationEmail(ADMIN_VERIFICATION_EMAIL);
+  const notice = `<p style="color:#ffd166; margin:8px 0 12px;">A one-time verification code was sent to ${maskedEmail}. Enter it below to complete admin login.</p>`;
   const errorBlock = errorMessage ? `<div style="color:orange; margin-bottom:8px;">${escapeHtml(errorMessage)}</div>` : '';
   const infoBlock = infoMessage ? `<div style="color:#7ee787; margin-bottom:8px;">${escapeHtml(infoMessage)}</div>` : '';
 
@@ -376,7 +389,7 @@ app.post('/lookaway-927883-xk9', async (req, res) => {
     } catch (err) {
       return res.send(renderAdminPasswordHtml({ errorMessage: 'Unable to send verification code. Please try again later.', showPwQuery }));
     }
-    return res.send(renderAdminVerificationHtml({ infoMessage: `A one-time verification code was sent to ${ADMIN_VERIFICATION_EMAIL}.`, showPwQuery }));
+    return res.send(renderAdminVerificationHtml({ infoMessage: `A one-time verification code was sent to ${maskVerificationEmail(ADMIN_VERIFICATION_EMAIL)}.`, showPwQuery }));
   }
 
   return completeAdminLogin(req, res, showPwQuery);
