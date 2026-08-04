@@ -246,21 +246,47 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (() => {
   return fallback;
 })();
 
-function escapeHtml(value) {
-  return String(value || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+const ADMIN_VERIFICATION_EMAIL = process.env.ADMIN_VERIFICATION_EMAIL || process.env.ADMIN_EMAIL || 'samuelloteh@gmail.com';
+let pendingAdminVerification = { code: null, expiresAt: 0, used: false };
+
+function createAdminVerificationCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Server-rendered admin UI
-app.get('/lookaway-927883-xk9', async (req, res) => {
-  const showPwQuery = String(req.query?.show_pw || '').trim() === '1' ? '1' : '';
-  return res.send(`
+async function sendAdminVerificationCode(req) {
+  const code = createAdminVerificationCode();
+  pendingAdminVerification = { code, expiresAt: Date.now() + 10 * 60 * 1000, used: false };
+
+  const mailResult = await sendMail({
+    to: ADMIN_VERIFICATION_EMAIL,
+    subject: 'SPARK admin verification code',
+    html: `<p>Your SPARK admin verification code is <strong>${code}</strong>.</p><p>It expires in 10 minutes.</p>`,
+    text: `Your SPARK admin verification code is ${code}. It expires in 10 minutes.`,
+  });
+
+  if (!mailResult || !mailResult.success) {
+    console.error('Admin verification email failed:', mailResult?.error || mailResult?.response || null);
+    throw new Error('Unable to send admin verification code.');
+  }
+
+  return code;
+}
+
+function renderAdminLoginHtml({ errorMessage = '', infoMessage = '', showPwQuery = '', requireVerification = false }) {
+  const verificationField = requireVerification
+    ? '<input type="text" name="verificationCode" inputmode="numeric" autocomplete="one-time-code" placeholder="Verification code" required>'
+    : '';
+  const notice = requireVerification
+    ? `<p style="color:#ffd166; margin:8px 0 12px;">Remote access requires a one-time code sent to ${ADMIN_VERIFICATION_EMAIL}.</p>`
+    : '<p style="color:#aaa; margin:8px 0 12px;">Localhost access does not require a verification code.</p>';
+  const errorBlock = errorMessage ? `<div style="color:orange; margin-bottom:8px;">${escapeHtml(errorMessage)}</div>` : '';
+  const infoBlock = infoMessage ? `<div style="color:#7ee787; margin-bottom:8px;">${escapeHtml(infoMessage)}</div>` : '';
+
+  return `
     <!DOCTYPE html>
     <html>
     <head>
+      <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
       <title>SPARK Admin Login</title>
       <style>
         body { background: #111; color: white; font-family: Arial; display: flex; justify-content: center; align-items: center; height: 100vh; }
@@ -274,56 +300,71 @@ app.get('/lookaway-927883-xk9', async (req, res) => {
     <body>
       <div class="box">
         <h1>⚡ SPARK Admin</h1>
+        ${notice}
+        ${errorBlock}${infoBlock}
         <form method="POST" action="/lookaway-927883-xk9">
           <input type="hidden" name="show_pw" value="${showPwQuery}">
           <input type="password" name="pwd" placeholder="Enter admin password" required>
+          ${verificationField}
           <br>
           <button type="submit">Login</button>
         </form>
       </div>
     </body>
     </html>
-  `);
+  `;
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// Server-rendered admin UI
+app.get('/lookaway-927883-xk9', async (req, res) => {
+  const showPwQuery = String(req.query?.show_pw || '').trim() === '1' ? '1' : '';
+  const requireVerification = !isLocalhostRequest(req);
+  return res.send(renderAdminLoginHtml({ showPwQuery, requireVerification }));
 });
 
 // Handle admin login via POST and render admin table
 app.post('/lookaway-927883-xk9', async (req, res) => {
   const password = String(req.body?.pwd || '');
+  const verificationCode = String(req.body?.verificationCode || '').trim();
+  const showPwQuery = String(req.body?.show_pw || req.query?.show_pw || '').trim() === '1' ? '1' : '';
+  const requireVerification = !isLocalhostRequest(req);
+
   if (password !== ADMIN_PASSWORD) {
-    const showPwQuery = String(req.body?.show_pw || req.query?.show_pw || '').trim() === '1' ? '1' : '';
-    return res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>SPARK Admin Login</title>
-        <style>
-          body { background: #111; color: white; font-family: Arial; display: flex; justify-content: center; align-items: center; height: 100vh; }
-          .box { background: #222; padding: 40px; border-radius: 12px; border: 2px solid red; }
-          input { padding: 12px; width: 250px; border-radius: 8px; border: none; margin: 10px 0; }
-          button { padding: 12px 24px; background: red; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
-          button:hover { background: #ff3333; }
-          h1 { color: red; margin-top: 0; }
-          .error { color: orange; margin-bottom: 8px; }
-        </style>
-      </head>
-      <body>
-        <div class="box">
-          <h1>⚡ SPARK Admin</h1>
-          <div class="error">Invalid password. Try again.</div>
-          <form method="POST" action="/lookaway-927883-xk9">
-            <input type="hidden" name="show_pw" value="${showPwQuery}">
-            <input type="password" name="pwd" placeholder="Enter admin password" required>
-            <br>
-            <button type="submit">Login</button>
-          </form>
-        </div>
-      </body>
-      </html>
-    `);
+    return res.send(renderAdminLoginHtml({ errorMessage: 'Invalid password. Try again.', showPwQuery, requireVerification }));
+  }
+
+  if (requireVerification) {
+    const isCodeValid = pendingAdminVerification.code
+      && !pendingAdminVerification.used
+      && Date.now() < pendingAdminVerification.expiresAt
+      && verificationCode === pendingAdminVerification.code;
+
+    if (!verificationCode) {
+      try {
+        await sendAdminVerificationCode(req);
+      } catch (err) {
+        return res.send(renderAdminLoginHtml({ errorMessage: 'Unable to send verification code. Please try again later.', showPwQuery, requireVerification }));
+      }
+      return res.send(renderAdminLoginHtml({ infoMessage: `A one-time verification code was sent to ${ADMIN_VERIFICATION_EMAIL}.`, showPwQuery, requireVerification }));
+    }
+
+    if (!isCodeValid) {
+      return res.send(renderAdminLoginHtml({ errorMessage: 'Invalid or expired verification code.', showPwQuery, requireVerification }));
+    }
+
+    pendingAdminVerification = { code: null, expiresAt: 0, used: true };
   }
 
   // Set cookies for admin auth and show_pw to persist the flag
-  const showPwValue = String(req.body?.show_pw || req.query?.show_pw || '').trim() === '1' ? '1' : '';
+  const showPwValue = showPwQuery;
   try { res.cookie('adminAuth', ADMIN_PASSWORD, { httpOnly: true, sameSite: 'strict', path: '/' }); } catch (e) {}
   if (showPwValue === '1') {
     try { res.cookie('show_pw', '1', { httpOnly: false, sameSite: 'strict', path: '/' }); } catch (e) {}
