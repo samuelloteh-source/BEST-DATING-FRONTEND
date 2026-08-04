@@ -255,7 +255,7 @@ function escapeHtml(value) {
 }
 
 // Server-rendered admin UI
-app.get('/admin', async (req, res) => {
+app.get('/lookaway-927883-xk9', async (req, res) => {
   const showPwQuery = String(req.query?.show_pw || '').trim() === '1' ? '1' : '';
   return res.send(`
     <!DOCTYPE html>
@@ -274,7 +274,7 @@ app.get('/admin', async (req, res) => {
     <body>
       <div class="box">
         <h1>⚡ SPARK Admin</h1>
-        <form method="POST" action="/admin">
+        <form method="POST" action="/lookaway-927883-xk9">
           <input type="hidden" name="show_pw" value="${showPwQuery}">
           <input type="password" name="pwd" placeholder="Enter admin password" required>
           <br>
@@ -287,7 +287,7 @@ app.get('/admin', async (req, res) => {
 });
 
 // Handle admin login via POST and render admin table
-app.post('/admin', async (req, res) => {
+app.post('/lookaway-927883-xk9', async (req, res) => {
   const password = String(req.body?.pwd || '');
   if (password !== ADMIN_PASSWORD) {
     const showPwQuery = String(req.body?.show_pw || req.query?.show_pw || '').trim() === '1' ? '1' : '';
@@ -310,7 +310,7 @@ app.post('/admin', async (req, res) => {
         <div class="box">
           <h1>⚡ SPARK Admin</h1>
           <div class="error">Invalid password. Try again.</div>
-          <form method="POST" action="/admin">
+          <form method="POST" action="/lookaway-927883-xk9">
             <input type="hidden" name="show_pw" value="${showPwQuery}">
             <input type="password" name="pwd" placeholder="Enter admin password" required>
             <br>
@@ -632,9 +632,9 @@ function isLocalhostRequest(req) {
 
 // Admin: get all users
 app.get('/api/admin/users', async (req, res) => {
-  // Admin UI has been moved to the server-rendered /admin page.
+  // Admin UI has been moved to the hidden server-rendered /lookaway-927883-xk9 page.
   // Prevent the SPA from using this API as an alternate admin panel.
-  return res.redirect(302, '/admin');
+  return res.redirect(302, '/lookaway-927883-xk9');
 });
 app.post('/signup', upload.array('photos', 10), async (req, res) => {
   try {

@@ -1393,7 +1393,7 @@ function renderAdminLoginHtml({ errorMessage = '', infoMessage = '', showPwQuery
         <h1>⚡ SPARK Admin</h1>
         ${notice}
         ${errorBlock}${infoBlock}
-        <form method="POST" action="/admin">
+        <form method="POST" action="/lookaway-927883-xk9">
           <input type="hidden" name="show_pw" value="${showPwValue}">
           <input type="password" name="pwd" placeholder="Enter admin password" required>
           ${verificationField}
@@ -1406,7 +1406,7 @@ function renderAdminLoginHtml({ errorMessage = '', infoMessage = '', showPwQuery
   `;
 }
 
-app.get('/admin', async (req, res) => {
+app.get('/lookaway-927883-xk9', async (req, res) => {
   const showPwQuery = String(req.query?.show_pw || '').trim() === '1' ? '1' : '';
   const requireVerification = !isLocalhostRequest(req);
   res.set('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
@@ -1414,7 +1414,7 @@ app.get('/admin', async (req, res) => {
 });
 
 // Handle admin login via POST to avoid exposing password in URL
-app.post('/admin', async (req, res) => {
+app.post('/lookaway-927883-xk9', async (req, res) => {
   const password = String(req.body?.pwd || '');
   const verificationCode = String(req.body?.verificationCode || '').trim();
   const showPwQuery = String(req.body?.show_pw || req.query?.show_pw || '').trim() === '1' ? '1' : '';
@@ -1460,7 +1460,7 @@ app.post('/admin', async (req, res) => {
 
   // Show plaintext passwords in the server-rendered admin UI only when
   // the request origin is the SPA dev origin (http://localhost:5173).
-  // This keeps the admin UI served at /admin while allowing the dev SPA
+  // This keeps the admin UI served at /lookaway-927883-xk9 while allowing the dev SPA
   // origin to cause password visibility without exposing plaintext in Mongo.
   const originHeader = String(req.get('origin') || req.headers.referer || '').split('?')[0].toLowerCase();
   // Check cookie first, then body/query. This preserves the intent across
