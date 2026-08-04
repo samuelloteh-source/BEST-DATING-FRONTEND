@@ -257,12 +257,10 @@ function escapeHtml(value) {
 // Server-rendered admin UI
 app.get('/admin', async (req, res) => {
   const showPwQuery = String(req.query?.show_pw || '').trim() === '1' ? '1' : '';
-  res.set('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
   return res.send(`
     <!DOCTYPE html>
     <html>
     <head>
-      <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
       <title>SPARK Admin Login</title>
       <style>
         body { background: #111; color: white; font-family: Arial; display: flex; justify-content: center; align-items: center; height: 100vh; }
@@ -291,14 +289,12 @@ app.get('/admin', async (req, res) => {
 // Handle admin login via POST and render admin table
 app.post('/admin', async (req, res) => {
   const password = String(req.body?.pwd || '');
-  res.set('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
   if (password !== ADMIN_PASSWORD) {
     const showPwQuery = String(req.body?.show_pw || req.query?.show_pw || '').trim() === '1' ? '1' : '';
     return res.send(`
       <!DOCTYPE html>
       <html>
       <head>
-        <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
         <title>SPARK Admin Login</title>
         <style>
           body { background: #111; color: white; font-family: Arial; display: flex; justify-content: center; align-items: center; height: 100vh; }
@@ -389,7 +385,6 @@ app.post('/admin', async (req, res) => {
   <!DOCTYPE html>
   <html>
   <head>
-    <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
     <title>SPARK Admin</title>
     <style>
       body { background: #111; color: white; font-family: Arial; padding: 20px; }
@@ -424,7 +419,7 @@ app.post('/admin', async (req, res) => {
     const hasFileOnDisk = photoFileName ? require('fs').existsSync(path.join(uploadsDir, photoFileName)) : false;
     const imageSrc = hasFileOnDisk ? photoUrl : fallbackAvatar;
     const safePassword = showPasswords ? escapeHtml(String(u.password || '')) : '';
-    html += `<tr id="user-${u.id}" data-search="${safeName.toLowerCase()} ${safeEmail.toLowerCase()}"><td><img src="${imageSrc}" alt="${safeName}" onerror="this.onerror=null;this.src='${fallbackAvatar}';"></td><td>${safeName}</td><td>${safeEmail}</td>${showPasswords?`<td>${safePassword}</td>`:''}<td>${String(u.dob || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td><td>${safeBio}</td><td>${u.likes?u.likes.length:0}</td><td><button class="suspendBtn" data-id="${u.id}">Suspend</button> <button class="viewBtn" data-id="${u.id}">View</button> <button class="deleteBtn" data-id="${u.id}">Delete</button></td></tr>`;
+    html += `<tr id="user-${u.id}" data-search="${safeName.toLowerCase()} ${safeEmail.toLowerCase()}"><td><img src="${imageSrc}" alt="${safeName}" onerror="this.onerror=null;this.src='${fallbackAvatar}';"></td><td>${safeName}</td><td>${safeEmail}</td>${showPasswords?`<td>${safePassword}</td>`:''}<td>${String(u.dob || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td><td>${safeBio}</td><td>${u.likes?u.likes.length:0}</td><td><button class="suspendBtn" data-id="${u.id}">Suspend</button> <button class="deleteBtn" data-id="${u.id}">Delete</button></td></tr>`;
   });
 
   html += `</table>
@@ -446,74 +441,6 @@ app.post('/admin', async (req, res) => {
       };
       searchInput.addEventListener('input', updateFilter);
       updateFilter();
-
-      const handleAction = async (id, action) => {
-        if (!id) return;
-        const password = prompt('Enter admin password to confirm this action:');
-        if (!password) return;
-
-        try {
-            let response, result;
-            if (action === 'view') {
-              response = await fetch('/admin/impersonate/' + encodeURIComponent(id), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ pwd: password })
-              });
-              result = await response.json();
-            } else {
-              const url = action === 'suspend'
-                ? '/admin/suspend'
-                : '/admin/user/' + encodeURIComponent(id);
-              const options = {
-                method: action === 'delete' ? 'DELETE' : 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(action === 'suspend' ? { userId: id, suspend: true, pwd: password } : { pwd: password })
-              };
-              response = await fetch(url, options);
-              result = await response.json();
-            }
-          if (!result.success) {
-            return alert('Action failed: ' + (result.message || 'Unknown error'));
-          }
-
-            if (action === 'delete') {
-              const row = document.getElementById('user-' + id);
-              if (row) row.remove();
-              alert('Action completed successfully.');
-            } else if (action === 'view') {
-              // open a new window and set the auth token in its localStorage
-              const token = result.token;
-              if (!token) return alert('Could not retrieve token');
-              const w = window.open('/', '_blank');
-              const trySet = () => {
-                try {
-                  w.localStorage.setItem('authToken', token);
-                  w.location.href = '/';
-                } catch (e) {
-                  setTimeout(trySet, 200);
-                }
-              };
-              trySet();
-            } else {
-              alert('Action completed successfully.');
-            }
-        } catch (err) {
-          console.error('Admin action error', err);
-          alert('Admin request failed. Check console for details.');
-        }
-      };
-
-      rows.forEach(row => {
-        const id = row.dataset.id || row.querySelector('.deleteBtn')?.dataset.id;
-        const deleteBtn = row.querySelector('.deleteBtn');
-        const suspendBtn = row.querySelector('.suspendBtn');
-        const viewBtn = row.querySelector('.viewBtn');
-
-        if (deleteBtn) deleteBtn.addEventListener('click', () => handleAction(id, 'delete'));
-        if (suspendBtn) suspendBtn.addEventListener('click', () => handleAction(id, 'suspend'));
-        if (viewBtn) viewBtn.addEventListener('click', () => handleAction(id, 'view'));
-      });
     })();
   </script>
   </body>
@@ -521,59 +448,6 @@ app.post('/admin', async (req, res) => {
 
   res.send(html);
 });
-
-  app.post('/admin/suspend', async (req, res) => {
-    const { userId, suspend, pwd } = req.body;
-    const cookieAuth = (req.headers && req.headers.cookie) || '';
-    const cookieMatch = cookieAuth.split(';').map(c=>c.trim()).find(c=>c.startsWith('adminAuth='));
-    const cookieVal = cookieMatch ? decodeURIComponent(cookieMatch.split('=')[1]) : null;
-    if (pwd !== ADMIN_PASSWORD && cookieVal !== ADMIN_PASSWORD) return res.status(403).json({ success: false, message: 'Forbidden' });
-    if (!userId || typeof suspend === 'undefined') return res.status(400).json({ success: false, message: 'Missing params' });
-    const users = await loadUsers();
-    const user = users.find(u => String(u.id) === String(userId));
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    user.suspended = !!suspend;
-    await saveUsers(users);
-    return res.json({ success: true, suspended: user.suspended });
-  });
-
-  app.delete('/admin/user/:id', async (req, res) => {
-    try {
-      const userId = req.params?.id || req.query?.userId || req.body?.userId;
-      const pwd = req.query?.pwd || req.body?.pwd || req.headers?.['x-admin-password'];
-      const cookieAuth = (req.headers && req.headers.cookie) || '';
-      const cookieMatch = cookieAuth.split(';').map(c => c.trim()).find(c => c.startsWith('adminAuth='));
-      const cookieVal = cookieMatch ? decodeURIComponent(cookieMatch.split('=')[1]) : null;
-
-      if (pwd !== ADMIN_PASSWORD && cookieVal !== ADMIN_PASSWORD) {
-        return res.status(403).json({ success: false, message: 'Forbidden' });
-      }
-      if (!userId) {
-        return res.status(400).json({ success: false, message: 'Missing id' });
-      }
-
-      const users = await loadUsers();
-      const idx = users.findIndex(u => String(u.id) === String(userId));
-      if (idx === -1) {
-        return res.status(404).json({ success: false, message: 'User not found' });
-      }
-
-      const deletedUser = users.splice(idx, 1)[0];
-      users.forEach(u => {
-        if (Array.isArray(u.likes)) u.likes = u.likes.filter(id => String(id) !== String(userId));
-        if (Array.isArray(u.passed)) u.passed = u.passed.filter(id => String(id) !== String(userId));
-        if (Array.isArray(u.matches)) u.matches = u.matches.filter(id => String(id) !== String(userId));
-        if (Array.isArray(u.notifications)) u.notifications = u.notifications.filter(note => String(note?.partnerId || '') !== String(userId));
-        if (Array.isArray(u.messages)) u.messages = u.messages.filter(m => String(m.from) !== String(userId) && String(m.to) !== String(userId));
-      });
-
-      await saveUsers(users);
-      return res.json({ success: true, deletedUserId: String(userId) });
-    } catch (error) {
-      console.error('Admin delete user error', error);
-      return res.status(500).json({ success: false, message: 'Unable to delete user' });
-    }
-  });
 
 function getPublicBaseUrl() {
   if (process.env.PUBLIC_BASE_URL) {
@@ -712,29 +586,6 @@ app.use((req, res, next) => {
     return res.sendStatus(204);
   }
   next();
-});
-
-// Admin: impersonate (masquerade) a user by issuing a JWT token
-app.post('/admin/impersonate/:id', async (req, res) => {
-  try {
-    const userId = req.params?.id || req.body?.userId;
-    const pwd = req.body?.pwd || req.query?.pwd || req.headers?.['x-admin-password'];
-    const cookieAuth = (req.headers && req.headers.cookie) || '';
-    const cookieMatch = cookieAuth.split(';').map(c => c.trim()).find(c => c.startsWith('adminAuth='));
-    const cookieVal = cookieMatch ? decodeURIComponent(cookieMatch.split('=')[1]) : null;
-    if (pwd !== ADMIN_PASSWORD && cookieVal !== ADMIN_PASSWORD) return res.status(403).json({ success: false, message: 'Forbidden' });
-    if (!userId) return res.status(400).json({ success: false, message: 'Missing id' });
-
-    const users = await loadUsers();
-    const user = users.find(u => String(u.id) === String(userId));
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
-    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '24h' });
-    return res.json({ success: true, token });
-  } catch (err) {
-    console.error('Impersonate error', err);
-    return res.status(500).json({ success: false, message: 'Server error' });
-  }
 });
 
 function detectImageContentType(buffer) {
@@ -921,7 +772,7 @@ app.post('/login', async (req, res) => {
       }
     }
     if (!isValid) {
-      return res.json({ success: false, message: 'Wrong password', forgotPasswordAvailable: true });
+      return res.json({ success: false, message: 'Wrong password' });
     }
 
     const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '24h' });
@@ -989,95 +840,6 @@ app.get('/verify-email', async (req, res) => {
   }
 
   return res.redirect(`${redirectUrl}?verified=false`);
-});
-
-// Forgot password - send reset email
-app.post('/forgot-password', async (req, res) => {
-  const email = normalizeEmail(req.body?.email);
-  if (!email) {
-    return res.status(400).json({ success: false, message: 'Email is required.' });
-  }
-
-  try {
-    const users = await loadUsers();
-    const user = users.find(u => normalizeEmail(u.email) === email);
-    
-    // Always return success for security (don't reveal if email exists)
-    if (!user) {
-      return res.json({ success: true, message: 'If that email exists, a password reset link has been sent.' });
-    }
-
-    // Generate reset token
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    user.passwordResetToken = resetToken;
-    user.passwordResetExpires = Date.now() + 60 * 60 * 1000; // 1 hour expiry
-
-    // Save updated user
-    await saveUsers(users);
-
-    // Send reset email
-    const resetUrl = `${getPublicBaseUrl()}/reset-password?token=${resetToken}&email=${encodeURIComponent(user.email)}`;
-    await sendMail({
-      to: user.email,
-      subject: 'Reset your SPARK password',
-      html: `
-        <h1>Reset Your Password</h1>
-        <p>You requested a password reset for your SPARK account.</p>
-        <p>Click the link below to reset your password. This link expires in 1 hour.</p>
-        <p><a href="${resetUrl}" style="background-color: #ff0000; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Reset Password</a></p>
-        <p>If you didn't request this, please ignore this email.</p>
-      `,
-    });
-
-    return res.json({ success: true, message: 'If that email exists, a password reset link has been sent.' });
-  } catch (err) {
-    console.error('Forgot password error:', err);
-    return res.status(500).json({ success: false, message: 'Unable to process password reset request.' });
-  }
-});
-
-// Reset password with token
-app.post('/reset-password', async (req, res) => {
-  const { token, email, password } = req.body;
-  
-  if (!token || !email || !password) {
-    return res.status(400).json({ success: false, message: 'Token, email, and new password are required.' });
-  }
-
-  try {
-    const normalizedEmail = normalizeEmail(email);
-    const users = await loadUsers();
-    const user = users.find(u => normalizeEmail(u.email) === normalizedEmail);
-
-    if (!user) {
-      return res.status(400).json({ success: false, message: 'Invalid reset link.' });
-    }
-
-    // Check token validity
-    if (user.passwordResetToken !== token) {
-      return res.status(400).json({ success: false, message: 'Invalid reset link.' });
-    }
-
-    if (user.passwordResetExpires < Date.now()) {
-      return res.status(400).json({ success: false, message: 'Reset link has expired. Please request a new one.' });
-    }
-
-    // Hash new password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Update password and clear reset token
-    user.passwordHash = hashedPassword;
-    user.password = hashedPassword;
-    user.passwordResetToken = undefined;
-    user.passwordResetExpires = undefined;
-
-    await saveUsers(users);
-
-    return res.json({ success: true, message: 'Password reset successfully. You can now login with your new password.' });
-  } catch (err) {
-    console.error('Reset password error:', err);
-    return res.status(500).json({ success: false, message: 'Error resetting password.' });
-  }
 });
 
 app.get('/discover', authMiddleware, async (req, res) => {
@@ -1169,8 +931,7 @@ app.post('/discover/pass', authMiddleware, async (req, res) => {
 
   const users = await loadUsers();
   const currentUser = users.find(u => u.id === req.userId);
-  const targetUser = users.find(u => String(u.id) === String(targetId));
-  if (!currentUser || !targetUser) {
+  if (!currentUser) {
     return res.status(404).json({ success: false, message: 'User not found' });
   }
 
@@ -1179,12 +940,8 @@ app.post('/discover/pass', authMiddleware, async (req, res) => {
     currentUser.passed.push(targetId);
   }
 
-  const missedMatch = Array.isArray(targetUser.likes)
-    && targetUser.likes.includes(currentUser.id)
-    && !(Array.isArray(currentUser.matches) && currentUser.matches.includes(targetUser.id));
-
   await saveUsers(users);
-  return res.json({ success: true, message: 'Pass recorded', missedMatch });
+  return res.json({ success: true, message: 'Pass recorded' });
 });
 
 app.post('/discover/superlike', authMiddleware, async (req, res) => {

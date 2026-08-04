@@ -110,13 +110,10 @@ function normalizeUserRecord(user) {
 }
 
 function getUserIdentity(user) {
-  // Use normalized email for deduplication (not ID)
-  // This prevents duplicate accounts with same email but different IDs
   if (!user) return '';
-  const email = normalizeEmail(user.email || '');
-  if (email) return email;
-  // Fallback to ID only if no email
-  return String(user.id || user._id || '').trim();
+  const id = String(user.id || user._id || '').trim();
+  if (id) return id;
+  return normalizeEmail(user.email || '');
 }
 
 async function ensureRepoSeedUsers(users) {
@@ -132,7 +129,6 @@ async function ensureRepoSeedUsers(users) {
   const mergedUsers = [];
   const seen = new Set();
 
-  // Add current users first (they have priority)
   for (const user of currentUsers) {
     const identity = getUserIdentity(user);
     if (!identity || seen.has(identity)) continue;
@@ -140,7 +136,6 @@ async function ensureRepoSeedUsers(users) {
     mergedUsers.push(user);
   }
 
-  // Add repo seed users only if not already seen (by email)
   for (const user of repoSeedUsers) {
     const identity = getUserIdentity(user);
     if (!identity || seen.has(identity)) continue;
