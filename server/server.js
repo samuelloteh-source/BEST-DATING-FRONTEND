@@ -60,6 +60,9 @@ const app = express();
 let faceMatchService = null;
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'sparkdating_jwt_secret';
+const ADMIN_VERIFICATION_EMAIL = process.env.ADMIN_VERIFICATION_EMAIL || process.env.ADMIN_EMAIL || 'samuelloteh@gmail.com';
+
+let pendingAdminVerification = { code: null, expiresAt: 0, used: false };
 
 const http = require('http');
 const https = require('https');
@@ -125,6 +128,64 @@ async function getTransporter() {
 
 function generateToken() {
   return crypto.randomBytes(20).toString('hex');
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function isLocalhostRequest(req) {
+  const host = String(req.get('host') || req.headers.host || req.headers['x-forwarded-host'] || req.hostname || '').toLowerCase();
+  const ip = String(req.ip || req.headers['x-forwarded-for'] || '').split(',')[0].trim().toLowerCase();
+  return host.startsWith('localhost')
+    || host.startsWith('127.0.0.1')
+    || host.startsWith('::1')
+    || ip === '127.0.0.1'
+    || ip === '::1'
+    || ip === '::ffff:127.0.0.1';
+}
+
+function getCookieValue(req, name) {
+  const cookieHeader = (req.headers && req.headers.cookie) || '';
+  const cookieMatch = cookieHeader.split(';').map(c => c.trim()).find(c => c.startsWith(`${name}=`));
+  return cookieMatch ? decodeURIComponent(cookieMatch.split('=')[1]) : null;
+}
+
+function createAdminVerificationCode() {
+  return String(crypto.randomInt(100000, 1000000)).padStart(6, '0');
+}
+
+async function sendAdminVerificationCode(req) {
+  const code = createAdminVerificationCode();
+  pendingAdminVerification = { code, expiresAt: Date.now() + 10 * 60 * 1000, used: false };
+  const result = await sendEmailWithFallback({
+    from: `Spark Dating <${process.env.EMAIL_FROM}>`,
+    to: ADMIN_VERIFICATION_EMAIL,
+    subject: 'SPARK admin verification code',
+    html: `<p>Your SPARK admin verification code is <strong>${code}</strong>.</p><p>It expires in 10 minutes.</p>`
+  });
+  if (result.messageId) {
+    console.log('Admin verification code email sent:', result.messageId);
+    if (result.previewUrl) console.log('Preview URL:', result.previewUrl);
+  } else {
+    console.warn('Failed to send admin verification code email', result.error);
+  }
+  return code;
+}
+
+function isAdminAuthorized(req, password) {
+  const cookieAuth = getCookieValue(req, 'adminAuth');
+  const verifiedCookie = getCookieValue(req, 'adminVerified');
+  const passwordMatches = password === ADMIN_PASSWORD;
+  const cookieMatches = cookieAuth === ADMIN_PASSWORD;
+  if (isLocalhostRequest(req)) {
+    return passwordMatches || cookieMatches;
+  }
+  return Boolean(verifiedCookie === '1' && (passwordMatches || cookieMatches));
 }
 
 async function sendGridMail(mailOptions) {
@@ -747,10 +808,7 @@ app.get('/me', requireAuth, (req, res) => {
 // Admin: suspend/unsuspend a user
 app.post('/admin/suspend', async (req, res) => {
   const { userId, suspend, pwd } = req.body;
-  const cookieAuth = (req.headers && req.headers.cookie) || '';
-  const cookieMatch = cookieAuth.split(';').map(c=>c.trim()).find(c=>c.startsWith('adminAuth='));
-  const cookieVal = cookieMatch ? decodeURIComponent(cookieMatch.split('=')[1]) : null;
-  if (pwd !== ADMIN_PASSWORD && cookieVal !== ADMIN_PASSWORD) return res.status(403).json({ success: false, message: 'Forbidden' });
+  if (!isAdminAuthorized(req, pwd)) return res.status(403).json({ success: false, message: 'Forbidden' });
   if (!userId || typeof suspend === 'undefined') return res.status(400).json({ success: false, message: 'Missing params' });
   const users = await loadUsersFromFile();
   const user = users.find(u => String(u.id) === String(userId));
@@ -765,11 +823,8 @@ app.post('/admin/impersonate/:id', async (req, res) => {
   try {
     const userId = req.params?.id || req.body?.userId;
     const pwd = req.body?.pwd || req.query?.pwd || req.headers?.['x-admin-password'];
-    const cookieAuth = (req.headers && req.headers.cookie) || '';
-    const cookieMatch = cookieAuth.split(';').map(c => c.trim()).find(c => c.startsWith('adminAuth='));
-    const cookieVal = cookieMatch ? decodeURIComponent(cookieMatch.split('=')[1]) : null;
 
-    if (pwd !== ADMIN_PASSWORD && cookieVal !== ADMIN_PASSWORD) {
+    if (!isAdminAuthorized(req, pwd)) {
       return res.status(403).json({ success: false, message: 'Forbidden' });
     }
 
@@ -796,11 +851,8 @@ app.delete('/admin/user/:id', async (req, res) => {
   try {
     const userId = req.params?.id || req.query?.userId || req.body?.userId;
     const pwd = req.query?.pwd || req.body?.pwd || req.headers?.['x-admin-password'];
-    const cookieAuth = (req.headers && req.headers.cookie) || '';
-    const cookieMatch = cookieAuth.split(';').map(c => c.trim()).find(c => c.startsWith('adminAuth='));
-    const cookieVal = cookieMatch ? decodeURIComponent(cookieMatch.split('=')[1]) : null;
 
-    if (pwd !== ADMIN_PASSWORD && cookieVal !== ADMIN_PASSWORD) {
+    if (!isAdminAuthorized(req, pwd)) {
       return res.status(403).json({ success: false, message: 'Forbidden' });
     }
 
@@ -1310,11 +1362,18 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (() => {
   return devPassword;
 })();
 
-app.get('/admin', async (req, res) => {
-  // Always show login form; POST will validate the password
-  const showPwQuery = String(req.query?.show_pw || '').trim() === '1' ? '1' : '';
-  res.set('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
-  return res.send(`
+function renderAdminLoginHtml({ errorMessage = '', infoMessage = '', showPwQuery = '', requireVerification = false }) {
+  const showPwValue = String(showPwQuery || '').trim() === '1' ? '1' : '';
+  const verificationField = requireVerification
+    ? '<input type="text" name="verificationCode" inputmode="numeric" autocomplete="one-time-code" placeholder="Verification code" required>'
+    : '';
+  const notice = requireVerification
+    ? `<p style="color:#ffd166; margin:8px 0 12px;">Remote access requires a one-time code sent to ${ADMIN_VERIFICATION_EMAIL}.</p>`
+    : '<p style="color:#aaa; margin:8px 0 12px;">Localhost access does not require a verification code.</p>';
+  const errorBlock = errorMessage ? `<div style="color:orange; margin-bottom:8px;">${escapeHtml(errorMessage)}</div>` : '';
+  const infoBlock = infoMessage ? `<div style="color:#7ee787; margin-bottom:8px;">${escapeHtml(infoMessage)}</div>` : '';
+
+  return `
     <!DOCTYPE html>
     <html>
     <head>
@@ -1332,83 +1391,71 @@ app.get('/admin', async (req, res) => {
     <body>
       <div class="box">
         <h1>⚡ SPARK Admin</h1>
+        ${notice}
+        ${errorBlock}${infoBlock}
         <form method="POST" action="/admin">
-          <input type="hidden" name="show_pw" value="${showPwQuery}">
+          <input type="hidden" name="show_pw" value="${showPwValue}">
           <input type="password" name="pwd" placeholder="Enter admin password" required>
+          ${verificationField}
           <br>
           <button type="submit">Login</button>
         </form>
       </div>
     </body>
     </html>
-    `);
+  `;
+}
+
+app.get('/admin', async (req, res) => {
+  const showPwQuery = String(req.query?.show_pw || '').trim() === '1' ? '1' : '';
+  const requireVerification = !isLocalhostRequest(req);
+  res.set('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
+  return res.send(renderAdminLoginHtml({ showPwQuery, requireVerification }));
 });
 
 // Handle admin login via POST to avoid exposing password in URL
 app.post('/admin', async (req, res) => {
   const password = String(req.body?.pwd || '');
+  const verificationCode = String(req.body?.verificationCode || '').trim();
+  const showPwQuery = String(req.body?.show_pw || req.query?.show_pw || '').trim() === '1' ? '1' : '';
+  const requireVerification = !isLocalhostRequest(req);
   res.set('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
+
   if (password !== ADMIN_PASSWORD) {
-    const showPwQuery = String(req.body?.show_pw || req.query?.show_pw || '').trim() === '1' ? '1' : '';
-    return res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
-        <title>SPARK Admin Login</title>
-        <style>
-          body { background: #111; color: white; font-family: Arial; display: flex; justify-content: center; align-items: center; height: 100vh; }
-          .box { background: #222; padding: 40px; border-radius: 12px; border: 2px solid red; }
-          input { padding: 12px; width: 250px; border-radius: 8px; border: none; margin: 10px 0; }
-          button { padding: 12px 24px; background: red; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
-          button:hover { background: #ff3333; }
-          h1 { color: red; margin-top: 0; }
-          .error { color: orange; margin-bottom: 8px; }
-        </style>
-      </head>
-      <body>
-        <div class="box">
-          <h1>⚡ SPARK Admin</h1>
-          <div class="error">Invalid password. Try again.</div>
-          <form method="POST" action="/admin">
-            <input type="hidden" name="show_pw" value="${showPwQuery}">
-            <input type="password" name="pwd" placeholder="Enter admin password" required>
-            <br>
-            <button type="submit">Login</button>
-          </form>
-        </div>
-      </body>
-      </html>
-    `);
+    return res.send(renderAdminLoginHtml({ errorMessage: 'Invalid password. Try again.', showPwQuery, requireVerification }));
+  }
+
+  if (requireVerification) {
+    const isCodeValid = pendingAdminVerification.code
+      && !pendingAdminVerification.used
+      && Date.now() < pendingAdminVerification.expiresAt
+      && verificationCode === pendingAdminVerification.code;
+
+    if (!verificationCode) {
+      await sendAdminVerificationCode(req);
+      return res.send(renderAdminLoginHtml({ infoMessage: `A one-time verification code was sent to ${ADMIN_VERIFICATION_EMAIL}.`, showPwQuery, requireVerification }));
+    }
+
+    if (!isCodeValid) {
+      return res.send(renderAdminLoginHtml({ errorMessage: 'Invalid or expired verification code.', showPwQuery, requireVerification }));
+    }
+
+    pendingAdminVerification = { code: null, expiresAt: 0, used: true };
   }
 
   // Persist admin auth and show_pw preference via cookies so the flag
   // survives redirects and subsequent requests. We store the adminAuth
   // cookie (checked elsewhere) and a non-httpOnly `show_pw` cookie when
   // requested by the dev SPA flow.
-  const showPwValue = String(req.body?.show_pw || req.query?.show_pw || '').trim() === '1' ? '1' : '';
+  const showPwValue = showPwQuery;
   try {
     res.cookie('adminAuth', ADMIN_PASSWORD, { httpOnly: true, sameSite: 'strict', path: '/' });
+    if (!isLocalhostRequest(req)) {
+      res.cookie('adminVerified', '1', { httpOnly: true, sameSite: 'strict', path: '/' });
+    }
   } catch (e) {}
   if (showPwValue === '1') {
     try { res.cookie('show_pw', '1', { httpOnly: false, sameSite: 'strict', path: '/' }); } catch (e) {}
-  }
-  function isLocalhostRequest(req) {
-    const host = String(req.get('host') || req.headers.host || req.headers['x-forwarded-host'] || req.hostname || '').toLowerCase();
-    const ip = String(req.ip || req.headers['x-forwarded-for'] || '').split(',')[0].trim().toLowerCase();
-    return host.startsWith('localhost')
-      || host.startsWith('127.0.0.1')
-      || ip === '127.0.0.1'
-      || ip === '::1'
-      || ip === '::ffff:127.0.0.1';
-  }
-
-  function escapeHtml(value) {
-    return String(value || '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
   }
 
   // Show plaintext passwords in the server-rendered admin UI only when
