@@ -34,6 +34,14 @@ server/messages.json
 server/data/users.json
 server/data/messages.json
 
+# Sensitive runtime and secret files
+.env
+.env.*
+server/.env*
+client/.env*
+database.sqlite
+server/database.sqlite
+
 # Sensitive local artifacts
 cookies*.txt
 *.cookie
@@ -74,5 +82,30 @@ uploads/
 .env*
 api/test-email.js
 
-# server utility scripts
+# server utility scripts and sensitive admin utilities
 server/scripts/*.js
+server/add-bot-users.js
+server/check-admin-users.js
+server/check-mongodb-direct.js
+server/check-passwords.js
+server/check-specific-users.js
+server/check-test-user.js
+server/check-users-missing-images.js
+server/check-users-no-images.js
+server/clean-seed-data.js
+server/fix-duplicate-emails.js
+server/fix-missing-images.js
+server/fix-mongo-duplicates.js
+server/find-problematic-users.js
+server/reset-password.js
+server/seed-female-users.js
+server/seed-more-users.js
+server/send-message-test.js
+server/smoke-test.js
+server/test-password-reset.js
+server/tmp_mongo_test.js
+server/tmp_mongo_test2.js
+server/tmp_mongo_test3.js
+server/tmp_mongo_test4.js
+server/tmp_tls_test.js
+server/update_seed_passwords.js
