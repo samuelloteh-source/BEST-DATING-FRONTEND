@@ -72,3 +72,4 @@ uploads/
 *.png
 .vercel
 .env*
+api/test-email.js
