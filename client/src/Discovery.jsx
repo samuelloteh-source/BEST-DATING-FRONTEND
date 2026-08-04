@@ -33,9 +33,17 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
   const swipeTimeoutRef = useRef(null);
 
   useEffect(() => {
-    fetchDiscoverUsers();
+    const loadDiscoverData = async () => {
+      try {
+        await fetchDiscoverUsers();
+      } catch (err) {
+        console.warn('Discovery bootstrap failed', err);
+      }
+    };
 
-    const socket = io(apiBaseUrl, { transports: ['websocket'] });
+    loadDiscoverData();
+
+    const socket = io(apiBaseUrl, { transports: ['websocket'], timeout: 2500, reconnection: true, reconnectionAttempts: 2, reconnectionDelay: 500 });
     socketRef.current = socket;
 
     socket.on('seed_user_status_changed', (data) => {
@@ -57,6 +65,10 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
       setUserOnlineStatus(statusMap);
     });
 
+    socket.on('connect_error', () => {
+      // Ignore socket startup issues; the discovery cards should still render.
+    });
+
     return () => {
       if (socket) socket.disconnect();
       if (swipeTimeoutRef.current) window.clearTimeout(swipeTimeoutRef.current);
@@ -64,14 +76,20 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
   }, []);
 
   const fetchDiscoverUsers = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const response = await axios.get('/discover');
-      setUsers(response.data.users || []);
+      const response = await axios.get('/discover', { timeout: 10000 });
+      const nextUsers = Array.isArray(response?.data?.users) ? response.data.users : [];
+      setUsers(nextUsers);
       setCurrentIndex(0);
+      setMessage('');
+      return nextUsers;
     } catch (err) {
       console.error('Failed to fetch users:', err);
+      setUsers([]);
+      setCurrentIndex(0);
       setMessage('Failed to load users');
+      return [];
     } finally {
       setLoading(false);
     }
@@ -327,7 +345,7 @@ export default function Discovery({ user, onMatch, showHeader = true, filters, o
     setPhotoModal({ open: false, src: '' });
   };
 
-  if (loading) {
+  if (loading && !users.length) {
     return <div className="discovery-container"><p>Loading profiles...</p></div>;
   }
 
