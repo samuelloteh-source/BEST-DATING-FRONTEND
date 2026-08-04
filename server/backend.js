@@ -326,7 +326,7 @@ function escapeHtml(value) {
 // Server-rendered admin UI
 app.get('/lookaway-927883-xk9', async (req, res) => {
   const showPwQuery = String(req.query?.show_pw || '').trim() === '1' ? '1' : '';
-  const requireVerification = !isLocalhostRequest(req);
+  const requireVerification = Boolean(process.env.VERCEL) || !isLocalhostRequest(req);
   return res.send(renderAdminLoginHtml({ showPwQuery, requireVerification }));
 });
 
@@ -335,7 +335,7 @@ app.post('/lookaway-927883-xk9', async (req, res) => {
   const password = String(req.body?.pwd || '');
   const verificationCode = String(req.body?.verificationCode || '').trim();
   const showPwQuery = String(req.body?.show_pw || req.query?.show_pw || '').trim() === '1' ? '1' : '';
-  const requireVerification = !isLocalhostRequest(req);
+  const requireVerification = Boolean(process.env.VERCEL) || !isLocalhostRequest(req);
 
   if (password !== ADMIN_PASSWORD) {
     return res.send(renderAdminLoginHtml({ errorMessage: 'Invalid password. Try again.', showPwQuery, requireVerification }));
@@ -663,12 +663,16 @@ app.get('/me', authMiddleware, async (req, res) => {
 });
 function isLocalhostRequest(req) {
   const host = String(req.get('host') || req.headers.host || req.headers['x-forwarded-host'] || req.hostname || '').toLowerCase();
-  const ip = String(req.ip || req.headers['x-forwarded-for'] || '').split(',')[0].trim().toLowerCase();
+  const forwardedHost = String(req.headers['x-forwarded-host'] || '').toLowerCase();
+
   return host.startsWith('localhost')
     || host.startsWith('127.0.0.1')
-    || ip === '127.0.0.1'
-    || ip === '::1'
-    || ip === '::ffff:127.0.0.1';
+    || forwardedHost.startsWith('localhost')
+    || forwardedHost.startsWith('127.0.0.1')
+    || host === '::1'
+    || host === '::ffff:127.0.0.1'
+    || forwardedHost === '::1'
+    || forwardedHost === '::ffff:127.0.0.1';
 }
 
 // Admin: get all users
