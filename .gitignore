@@ -31,6 +31,30 @@ uploads/
 server/uploads/
 server/users.json
 server/messages.json
+server/data/users.json
+server/data/messages.json
+
+# Sensitive local artifacts
+cookies*.txt
+*.cookie
+*.cookies
+*.pem
+*.pfx
+*.key
+*.crt
+*.sqlite
+*.db
+*.bak
+*.tmp
+
+# Local test/debug output
+cmd_test_*.txt
+run_vs_build_*.txt
+*_err.txt
+*_out.txt
+server/install-log.txt
+server/*.log
+server/scripts/test_*.js
 
 # IDE
 .vscode/
