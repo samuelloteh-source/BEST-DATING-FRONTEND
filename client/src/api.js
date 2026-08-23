@@ -5,9 +5,8 @@ import axios from 'axios'
 // provided (non-empty), use it; otherwise use a relative base so the browser
 // sends requests to the same origin that served the frontend.
 const envApi = import.meta.env.VITE_API_URL
-export const apiBaseUrl = (typeof envApi === 'string' && envApi.length > 0)
-  ? envApi.replace(/\/api\/?$/, '')
-  : ''
+const normalizeApiBaseUrl = (value) => typeof value === 'string' ? value.replace(/\/api\/?$/, '') : ''
+export const apiBaseUrl = normalizeApiBaseUrl(envApi)
 
 axios.defaults.baseURL = apiBaseUrl
 axios.defaults.withCredentials = false
@@ -28,6 +27,7 @@ export const resolveImageUrl = (url) => {
 }
 
 axios.interceptors.request.use((config) => {
+  config.baseURL = normalizeApiBaseUrl(config.baseURL || apiBaseUrl)
   const token = localStorage.getItem('authToken')
   if (token) {
     config.headers = config.headers || {}
