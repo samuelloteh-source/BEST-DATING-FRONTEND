@@ -799,7 +799,7 @@ function App() {
         </div>
       </div>
     )
-  })() : view === 'login' ? loginView : signupView
+  })() : view === 'login' ? loginView : loginView
 }
 
 export default App
