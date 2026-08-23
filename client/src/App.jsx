@@ -201,7 +201,7 @@ function App() {
     try {
       const res = await axios.post('/login', { email: loginEmail, password: loginPassword })
       if (res.data?.success) {
-        setMessage('Login successful!')
+        setMessage('')
         setLoginEmail('')
         setLoginPassword('')
         setCanResendVerification(false)
@@ -212,6 +212,8 @@ function App() {
         }
         if (res.data?.user) {
           setUser(res.data.user)
+          setCurrentPage('discover')
+          setAuthLoading(false)
           setView('app')
         } else {
           await fetchCurrentUser()

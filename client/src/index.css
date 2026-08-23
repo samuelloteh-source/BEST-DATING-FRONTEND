@@ -15,8 +15,8 @@
   --shadow:
     rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --sans: 'Avenir Next', 'Segoe UI', sans-serif;
+  --heading: 'Trebuchet MS', 'Segoe UI', sans-serif;
   --mono: ui-monospace, Consolas, monospace;
 
   font: 18px/145% var(--sans);
@@ -57,7 +57,10 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: #121212;
+  background:
+    radial-gradient(circle at 12% 10%, rgba(255, 96, 144, 0.16), transparent 28rem),
+    radial-gradient(circle at 88% 80%, rgba(255, 138, 0, 0.12), transparent 26rem),
+    #121212;
   color: #e5e7eb;
 }
 
@@ -90,6 +93,7 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
+  animation: page-enter 0.45s ease both;
 }
 
 .page-shell {
@@ -103,8 +107,11 @@ html, body {
   display: flex;
   flex-direction: column;
   padding-bottom: 100px;
-  background: linear-gradient(180deg, #f7f6ff 0%, #eef0fb 100%);
+  background:
+    radial-gradient(circle at 8% 0%, rgba(255, 96, 144, 0.14), transparent 25rem),
+    linear-gradient(180deg, #f7f6ff 0%, #eef0fb 100%);
   color: #1f1f32;
+  animation: page-enter 0.45s ease both;
 }
 
 .app-shell, .app-shell * {
@@ -125,6 +132,12 @@ html, body {
   box-shadow: 0 35px 80px rgba(0, 0, 0, 0.35);
   backdrop-filter: blur(18px);
   padding: 36px;
+  transition: box-shadow 0.25s ease, transform 0.25s ease;
+}
+
+.page-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 40px 90px rgba(0, 0, 0, 0.42);
 }
 
 .page-title {
@@ -173,6 +186,15 @@ html, body {
   color: #fff;
   padding: 14px 16px;
   font-size: 16px;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.form-field input:focus,
+.form-field textarea:focus {
+  outline: none;
+  border-color: rgba(255, 123, 184, 0.85);
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 0 0 4px rgba(255, 123, 184, 0.12);
 }
 
 .form-field input::placeholder,
@@ -218,6 +240,33 @@ html, body {
 .secondary-button:hover,
 .button-link:hover {
   transform: translateY(-1px);
+}
+
+.primary-button:hover {
+  box-shadow: 0 10px 24px rgba(255, 96, 144, 0.24);
+}
+
+.primary-button:focus-visible,
+.secondary-button:focus-visible,
+.button-link:focus-visible,
+.nav-btn:focus-visible,
+.notification-btn:focus-visible,
+.clear-notifications:focus-visible {
+  outline: 3px solid rgba(255, 123, 184, 0.7);
+  outline-offset: 3px;
+}
+
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 .button-link {

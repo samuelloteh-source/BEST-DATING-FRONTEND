@@ -19,10 +19,10 @@ const User = require('./models/User');
 console.log('DB using User _id type:', User.schema.paths._id.instance, 'opts:', User.schema.paths._id.options);
 
 const MONGO_URI = process.env.MONGO_URI;
-const REPO_DATA_DIR = path.join(__dirname, 'data');
+const REPO_DATA_DIR = path.join(__dirname);
 const DATA_DIR = process.env.VERCEL
   ? path.join(require('os').tmpdir(), 'best-dating-data')
-  : REPO_DATA_DIR;
+  : path.join(__dirname, 'data');
 const PENDING_SIGNUPS_FILE = path.join(DATA_DIR, 'pending_signups.json');
 const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
 const REPO_USERS_FILE = path.join(REPO_DATA_DIR, 'users.json');
@@ -118,11 +118,17 @@ function getUserIdentity(user) {
 
 async function ensureRepoSeedUsers(users) {
   const currentUsers = Array.isArray(users) ? users.filter(Boolean).map(normalizeUserRecord) : [];
-  console.log('DEBUG ensureRepoSeedUsers readJsonFile', typeof readJsonFile);
   const repoUsers = await readJsonFile(REPO_USERS_FILE, []);
+  const fallbackRepoUsers = await readJsonFile(path.join(__dirname, 'data', 'users.json'), []);
   const repoSeedUsers = Array.isArray(repoUsers) ? repoUsers.filter(Boolean).map(normalizeUserRecord) : [];
+  const fallbackSeedUsers = Array.isArray(fallbackRepoUsers) ? fallbackRepoUsers.filter(Boolean).map(normalizeUserRecord) : [];
 
-  if (!repoSeedUsers.length) {
+  const mergedSeedUsers = [...repoSeedUsers, ...fallbackSeedUsers].filter((user, index, arr) => {
+    const identity = getUserIdentity(user);
+    return Boolean(identity) && arr.findIndex((candidate) => getUserIdentity(candidate) === identity) === index;
+  });
+
+  if (!mergedSeedUsers.length) {
     return currentUsers;
   }
 
@@ -136,7 +142,7 @@ async function ensureRepoSeedUsers(users) {
     mergedUsers.push(user);
   }
 
-  for (const user of repoSeedUsers) {
+  for (const user of mergedSeedUsers) {
     const identity = getUserIdentity(user);
     if (!identity || seen.has(identity)) continue;
     seen.add(identity);
