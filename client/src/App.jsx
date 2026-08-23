@@ -26,7 +26,7 @@ function App() {
     if (path === '/forgot-password') return 'forgot-password'
     if (path === '/reset-password') return 'reset-password'
     if (path.startsWith('/app')) return 'app'
-    return 'loading'
+    return 'signup'
   })
   const [currentPage, setCurrentPage] = useState(() => {
     const path = window.location.pathname.replace(/\/$/, '')
@@ -128,7 +128,7 @@ function App() {
         if (page === '/profile') return setCurrentPage('profile')
         setCurrentPage('discover')
       } else {
-        setView('login')
+        setView('signup')
       }
     }
 
@@ -137,6 +137,11 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!window.location.pathname.replace(/\/$/, '').startsWith('/app')) {
+      setAuthLoading(false)
+      return
+    }
+
     if (!authToken) {
       delete axios.defaults.headers.common['Authorization']
       setAuthLoading(false)
