@@ -146,7 +146,7 @@ function App() {
     axios.defaults.headers.common['Authorization'] = `Bearer ${authToken}`
     const initializeAuth = async () => {
       try {
-        await fetchCurrentUser()
+        await fetchCurrentUser(authToken)
         await fetchNotifications()
       } catch (err) {
         console.error('Auth initialization failed:', err)
@@ -176,13 +176,16 @@ function App() {
     }
   }
 
-  const fetchCurrentUser = async () => {
+  const fetchCurrentUser = async (token = authToken) => {
     setAuthLoading(true)
     try {
       const res = await axios.get('/me', { timeout: 10000 })
       setUser(res.data.user || res.data)
       setView('app')
     } catch (err) {
+      if (token !== localStorage.getItem('authToken') || token !== authToken) {
+        return
+      }
       localStorage.removeItem('authToken')
       setAuthToken(null)
       setView('login')
