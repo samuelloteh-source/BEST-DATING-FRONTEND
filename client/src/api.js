@@ -5,7 +5,9 @@ import axios from 'axios'
 // provided (non-empty), use it; otherwise use a relative base so the browser
 // sends requests to the same origin that served the frontend.
 const envApi = import.meta.env.VITE_API_URL
-export const apiBaseUrl = (typeof envApi === 'string' && envApi.length > 0) ? envApi : ''
+export const apiBaseUrl = (typeof envApi === 'string' && envApi.length > 0)
+  ? envApi.replace(/\/api\/?$/, '')
+  : ''
 
 axios.defaults.baseURL = apiBaseUrl
 axios.defaults.withCredentials = false
