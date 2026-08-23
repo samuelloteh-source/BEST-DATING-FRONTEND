@@ -16,6 +16,10 @@
       "handle": "filesystem"
     },
     {
+      "src": "^/app(?:/.*)?$",
+      "dest": "/client/index.html"
+    },
+    {
       "src": "^/(api|uploads|signup|login|logout|verify/face|verify-email|resend-verification|me|notifications|discover|matches|likes|messages|profile|seed-users|health|lookaway-927883-xk9)(/.*)?$",
       "dest": "/server/backend.js"
     },
